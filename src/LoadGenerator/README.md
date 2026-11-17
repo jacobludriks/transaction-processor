@@ -30,6 +30,7 @@ Options for `load`:
 | `--senders` | 4 | concurrent senders (one Service Bus sender each) |
 | `--batch-size` | 100 | messages per send (a batch is also split if it reaches the Service Bus size limit) |
 | `--seed` | 12345 | random seed, so a run is repeatable |
+| `--summary-file` | off | write a machine-readable run summary (JSON: start and end time, target and achieved rate, messages sent and failed, settings) for the measurement report in `src/RunReport`. Use `--duration 840` (14 minutes) so the report has ten whole minutes to measure |
 | `--topic` | `transactions-in` | topic name |
 | `--dry-run` | off | generate and pace but send nothing; needs no Azure access |
 

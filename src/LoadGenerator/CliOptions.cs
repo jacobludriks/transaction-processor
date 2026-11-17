@@ -22,6 +22,7 @@ public sealed class CliOptions
           --senders <n>               concurrent senders (default 4)
           --batch-size <n>            messages per send (default 100)
           --seed <n>                  random seed (default 12345)
+          --summary-file <path>       write a machine-readable run summary (JSON) for the measurement report
           --dry-run                   generate and pace, but send nothing (no Azure needed)
 
         Functional mode:
@@ -41,6 +42,7 @@ public sealed class CliOptions
     public int BatchSize { get; init; } = 100;
     public int Seed { get; init; } = 12345;
     public bool DryRun { get; init; }
+    public string? SummaryFile { get; init; }
     public bool IncludeMissingSku { get; init; }
     public bool IncludeUnknownItem { get; init; }
 
@@ -60,7 +62,7 @@ public sealed class CliOptions
             else throw new ArgumentException($"Unknown or incomplete option '{arg}'.");
         }
 
-        var known = new HashSet<string> { "--namespace", "--topic", "--client-id", "--rate", "--duration", "--unmatched-ratio", "--senders", "--batch-size", "--seed" };
+        var known = new HashSet<string> { "--namespace", "--topic", "--client-id", "--rate", "--duration", "--unmatched-ratio", "--senders", "--batch-size", "--seed", "--summary-file" };
         var unknown = values.Keys.FirstOrDefault(k => !known.Contains(k));
         if (unknown is not null) throw new ArgumentException($"Unknown option '{unknown}'.");
 
@@ -77,6 +79,7 @@ public sealed class CliOptions
             BatchSize = (int)Double(values, "--batch-size", 100),
             Seed = (int)Double(values, "--seed", 12345),
             DryRun = flags.Contains("--dry-run"),
+            SummaryFile = values.GetValueOrDefault("--summary-file"),
             IncludeMissingSku = flags.Contains("--include-missing-sku"),
             IncludeUnknownItem = flags.Contains("--include-unknown-item"),
         };

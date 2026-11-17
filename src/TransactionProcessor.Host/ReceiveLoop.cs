@@ -13,12 +13,13 @@ public sealed class ReceiveLoop(
     TransactionHandler handler,
     IOptions<ProcessorOptions> options,
     HealthState health,
+    ProcessorMetrics metrics,
     ILogger<ReceiveLoop> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var settings = options.Value;
-        var messageProcessor = new MessageProcessor(handler.HandleAsync);
+        var messageProcessor = new MessageProcessor(handler.HandleAsync, metrics);
 
         await using var processor = client.CreateProcessor(settings.TopicName, settings.SubscriptionName, new ServiceBusProcessorOptions
         {
@@ -29,7 +30,7 @@ public sealed class ReceiveLoop(
         });
 
         processor.ProcessMessageAsync += args =>
-            messageProcessor.ProcessAsync(args.Message.Body.ToString(), new ServiceBusMessageSettlement(args), args.CancellationToken);
+            messageProcessor.ProcessAsync(args.Message.Body.ToString(), new ServiceBusMessageSettlement(args), args.CancellationToken, args.Message.EnqueuedTime);
         processor.ProcessErrorAsync += args =>
         {
             logger.LogError(args.Exception, "Service Bus error from {Source} on {EntityPath}", args.ErrorSource, args.EntityPath);

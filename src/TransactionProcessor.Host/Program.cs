@@ -3,6 +3,7 @@ using Azure.Identity;
 using Azure.Messaging.ServiceBus;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
 using Microsoft.Extensions.Options;
+using OpenTelemetry.Metrics;
 using TransactionProcessor;
 using TransactionProcessor.Host;
 
@@ -19,7 +20,13 @@ builder.Services.AddOptions<ProcessorOptions>()
 // Application Insights. The connection string comes from the APPLICATIONINSIGHTS_CONNECTION_STRING app setting;
 // without it (local runs) telemetry is simply off.
 if (!string.IsNullOrWhiteSpace(builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]))
-    builder.Services.AddOpenTelemetry().UseAzureMonitor();
+    builder.Services.AddOpenTelemetry().UseAzureMonitor().WithMetrics(metrics => metrics
+        .AddMeter(ProcessorMetrics.MeterName)
+        // Explicit latency buckets (seconds), dense around the 2 s p95 target.
+        .AddView(ProcessorMetrics.LatencyInstrument, new ExplicitBucketHistogramConfiguration
+        {
+            Boundaries = ProcessorMetrics.LatencyBucketBoundariesSeconds,
+        }));
 
 // One credential for everything: the user-assigned managed identity chosen by client ID.
 builder.Services.AddSingleton<TokenCredential>(sp =>
@@ -44,6 +51,7 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<IEventHubSender>()));
 
 builder.Services.AddSingleton<HealthState>();
+builder.Services.AddSingleton<ProcessorMetrics>();
 builder.Services.AddHostedService<ReceiveLoop>();
 
 var app = builder.Build();
