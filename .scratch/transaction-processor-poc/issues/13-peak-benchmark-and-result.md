@@ -13,3 +13,9 @@
 - [ ] The written result states: go or no-go, peak TPS, the bottleneck, the configuration it was measured on, the approximate cost per hour and per million messages, and the caveats (Azure SQL Database rather than Managed Instance, a Premium v3 plan rather than an ASE, private-endpoint latency not reproduced)
 - [ ] If the database is the bottleneck, the result says so and recommends whether to add the in-memory cache. The cache itself is not built unless you explicitly ask
 - [ ] Total spend and runtime are recorded against the AU$30 target and AU$50 ceiling, and the environment is torn down
+
+## Progress note (2026-11-17)
+
+Stepped ramp done, one variable at a time (concurrency, Service Bus messaging units, instance count). Peak for the baseline 3 instances is about 750 msg/s (concurrency 48); with 6 instances at least 1,000 msg/s with margin and about 1,300 at the edge (p95 2.76 s). The ceiling is per instance (about 240 msg/s each) and is not set by CPU, the database or Service Bus capacity; the exact in-process cause is not identified. The database was never a bottleneck, so the cache is not recommended. Full write-up in `deployment-results.md`.
+
+Not done: the effect of the database tier was not measured (the database was at 7 to 22% CPU, so it was not the limit, but a second tier was not run); the 6-instance ceiling was not found; the cost per hour and per million messages was not computed from billing data; spend recorded and the environment torn down are still open.
