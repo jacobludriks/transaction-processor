@@ -88,6 +88,13 @@ param sqlSkuFamily string = 'Gen5'
 @description('SQL database vCores. Redeploy with a different value (for example 6 or 8) to scale between benchmark runs.')
 param sqlSkuCapacity int = 4
 
+@description('Zone-redundant SQL database. Defaults to true per the spec. Set false only where the subscription refuses zone-redundant databases (Azure error ProvisioningDisabled seen on the first live deployment in Australia East); record the deviation in the results.')
+param sqlZoneRedundant bool = true
+
+@description('SQL backup storage redundancy (Local, Zone or Geo).')
+@allowed(['Local', 'Zone', 'Geo'])
+param sqlBackupRedundancy string = 'Zone'
+
 // Identities (ticket 07)
 
 @description('Also attach the processor identity to the tooling VM, so the verification script can prove from the VM that the processor identity is refused write access. The VM then holds both identities. Set to false after verification (redeploy) if you want the VM limited to the tooling identity.')
@@ -241,6 +248,8 @@ module sql 'modules/sql.bicep' = {
     skuTier: sqlSkuTier
     skuFamily: sqlSkuFamily
     skuCapacity: sqlSkuCapacity
+    zoneRedundant: sqlZoneRedundant
+    backupStorageRedundancy: sqlBackupRedundancy
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
     sqlDnsZoneId: network.outputs.sqlDnsZoneId
   }

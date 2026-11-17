@@ -27,6 +27,10 @@ param(
   [Parameter(Mandatory)] [string] $SqlAdminName,
   # SQL vCores. Change between runs to scale the database; the rest is not rebuilt.
   [ValidateRange(2, 80)] [int] $SqlSkuCapacity = 4,
+  # Deploy the SQL database without zone redundancy. Needed where the subscription refuses zone-redundant databases (ProvisioningDisabled).
+  [switch] $SqlNotZoneRedundant,
+  # SQL backup storage redundancy.
+  [ValidateSet('Local', 'Zone', 'Geo')] [string] $SqlBackupRedundancy = 'Zone',
   # Processor host: pinned instance count and Service Bus concurrency per instance. Configuration only, no code change.
   [ValidateRange(2, 30)] [int] $ProcessorInstanceCount = 3,
   [ValidateRange(1, 10000)] [int] $MaxConcurrentCalls = 16,
@@ -57,6 +61,8 @@ $env:POC_BUDGET_EMAIL = $BudgetEmail
 $env:POC_SQL_ADMIN_OBJECT_ID = $SqlAdminObjectId
 $env:POC_SQL_ADMIN_NAME = $SqlAdminName
 $env:POC_SQL_SKU_CAPACITY = "$SqlSkuCapacity"
+$env:POC_SQL_ZONE_REDUNDANT = if ($SqlNotZoneRedundant) { 'false' } else { 'true' }
+$env:POC_SQL_BACKUP_REDUNDANCY = $SqlBackupRedundancy
 $env:POC_PROCESSOR_INSTANCE_COUNT = "$ProcessorInstanceCount"
 $env:POC_MAX_CONCURRENT_CALLS = "$MaxConcurrentCalls"
 $env:POC_PREFETCH_COUNT = "$PrefetchCount"

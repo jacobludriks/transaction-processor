@@ -36,6 +36,11 @@ param sqlSkuName = 'GP_Gen5'
 param sqlSkuTier = 'GeneralPurpose'
 param sqlSkuFamily = 'Gen5'
 param sqlSkuCapacity = int(readEnvironmentVariable('POC_SQL_SKU_CAPACITY', '4'))
+// Zone redundancy for the database. The first live deployment was refused
+// (ProvisioningDisabled) on this subscription, so deploy.ps1 -SqlNotZoneRedundant
+// sets POC_SQL_ZONE_REDUNDANT=false. Default is true.
+param sqlZoneRedundant = readEnvironmentVariable('POC_SQL_ZONE_REDUNDANT', 'true') == 'true'
+param sqlBackupRedundancy = readEnvironmentVariable('POC_SQL_BACKUP_REDUNDANCY', 'Zone')
 
 // Budget: ceiling AU$50, alerts at AU$20, AU$35 and AU$45.
 param budgetAmount = 50
