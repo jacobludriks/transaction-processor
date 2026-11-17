@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Unparseable XML gives a dead-letter outcome with its own distinct reason
 - [x] A message missing `itemId` gives a dead-letter outcome with its own distinct reason
