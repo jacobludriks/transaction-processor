@@ -104,7 +104,7 @@ It is idempotent: run it again at any time. It ends by listing each user and its
   --tooling-client-id   <toolingIdentityClientId>
 ```
 
-It prints PASS or FAIL per check and exits non-zero on any failure. Run it before the processor is started. It gets tokens for each identity from the VM's identity endpoint and calls the Service Bus and Event Hubs REST endpoints, and signs in to SQL with `sqlcmd --authentication-method ActiveDirectoryManagedIdentity -U <client id>`. It checks:
+It prints PASS or FAIL per check and exits non-zero on any failure. Run it before the processor is started if you can. It gets tokens for each identity from the VM's identity endpoint and calls the Service Bus and Event Hubs REST endpoints, and signs in to SQL with `sqlcmd --authentication-method ActiveDirectoryManagedIdentity -U <client id>`. It checks:
 
 - tooling sends to the topic (accepted), and the processor cannot (401/403);
 - tooling can read the subscription, the queue and both dead-letter queues; the processor can read the subscription but not the queue;
@@ -112,6 +112,10 @@ It prints PASS or FAIL per check and exits non-zero on any failure. Run it befor
 - tooling creates a scratch table and writes a row; the processor can read it, its insert is refused (`permission was denied`), and it cannot create a table. The scratch table is dropped at the end (`--keep` leaves it).
 
 Event Hubs receive is an AMQP operation, so "tooling can receive from the event hub" is not covered by curl. Confirm it with the throwaway event hub reader, or check the role assignment on the event hub in the portal.
+
+Token audiences: the script requests a Service Bus token for the resource `https://servicebus.azure.net` and an Event Hubs token for `https://eventhubs.azure.net`. They are different Microsoft Entra resources (see [Authenticate an application to access Service Bus](https://learn.microsoft.com/azure/service-bus-messaging/authenticate-application) and [Authenticate an application to access Event Hubs](https://learn.microsoft.com/azure/event-hubs/authenticate-application)). The earlier version asked for the Service Bus resource on the Event Hubs calls, which the documentation does not support.
+
+**The probe messages are identifiable, and one of them will dead-letter.** Every message the script sends carries the application property `PocAccessCheck=true` and a body that says it is an access check, not a transaction. The probe sent to the input topic is valid XML with no `itemId`, so once the processor runs it is dead-lettered with reason `MissingItemId` (if the script ran before the processor started, this happens at the processor's first start). **Ignore or purge that dead-letter before a benchmark run** (and the probe left in the output queue and event hub), so it cannot be mistaken for an unexplained dead-letter when checking the "no unexplained dead-letters" go/no-go criterion. Identify it by the `PocAccessCheck` property or the "Access check from verify-access.sh" body text.
 
 The setup and verify scripts, and the REST and `sqlcmd` behaviours they rely on (for example `AZURE_TOKEN_CREDENTIALS=AzureCLICredential` being honoured by the installed `sqlcmd`, and bearer-token REST calls through the private endpoints), have been syntax-checked only. They have not run against Azure.
 
