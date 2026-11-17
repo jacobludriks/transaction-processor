@@ -11,7 +11,7 @@
 - [x] The result is stated against each criterion: sustained 300 TPS, p95 latency under 2 seconds, zero lost messages, and no unexplained dead-letters
 - [x] If the run falls short (not needed: the baseline met the criteria on the clean rerun), the database tier is scaled up once or twice and the run repeated, to decide between go and no-go (no-go means 300 TPS can't be reached even after a reasonable DB scale-up)
 - [x] A clear go or no-go is written down
-- [ ] Spend so far and runtime used are recorded, and the environment is torn down if no further runs are planned
+- [x] Spend so far and runtime used are recorded (estimate, not checked against billing), and the environment is torn down
 
 ## Result
 

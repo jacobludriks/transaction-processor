@@ -127,3 +127,11 @@ To go higher than the baseline, add instances: it is the lever that worked, and 
 - One run per configuration, so the differences of a few percent (for example 695 vs 738) are not significant.
 - Latency is from Service Bus enqueue time to output sent, using the host's clock.
 - The private-endpoint latency to an ASE was not reproduced; production on an ASE may differ.
+
+## Spend, runtime and teardown
+
+- **Runtime:** the environment existed from about 09:49 UTC (first deployment) to about 12:20 UTC (teardown), roughly 2.5 hours. About 1 hour 45 minutes of that was at the baseline size (3 instances, 1 messaging unit); the last 30 to 40 minutes were scaled up for the experiments (2 messaging units, then 6 instances).
+- **Estimated spend: about AU$10 to 14.** This is my estimate from list-price rates (AU$4 to 6 per hour at the baseline size, about AU$7 to 8 per hour scaled up), **not checked against billing**. Azure Cost Management usually shows actual figures within a day. It is well inside the AU$30 target and the AU$50 ceiling.
+- **Indicative cost per million messages** at the 3-instance peak (about 750 msg/s, 2.7 million messages per hour, AU$4 to 6 per hour): roughly AU$1.5 to 2.2. This inherits the same uncertainty and ignores that the ceiling was not reached on every resource, so treat it as an order of magnitude.
+- **Teardown:** `teardown.ps1 -Force` deleted the resource group and returned "Nothing left behind". Verified independently afterwards: the group does not exist, the deployment record is gone, no resource tagged for the POC remains in the subscription, and the budget was removed (it showed in a listing for a short time after the group was deleted, then disappeared; the listing was stale).
+- **Not deployed again from scratch:** the corrected VM bootstrap (cloud-init) and the SQL zone-redundancy parameter have only been exercised as live edits plus a template build, not by a clean redeployment.
