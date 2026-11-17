@@ -45,10 +45,13 @@ builder.Services.AddSingleton<IEventHubSender>(sp =>
     return new EventHubProducerSender(o.EventHubsNamespace, o.EventHubName, sp.GetRequiredService<TokenCredential>());
 });
 builder.Services.AddSingleton(sp =>
-    new TransactionHandler(
-        SqlConnectionStrings.ForManagedIdentity(sp.GetRequiredService<IOptions<ProcessorOptions>>().Value),
+{
+    var o = sp.GetRequiredService<IOptions<ProcessorOptions>>().Value;
+    return new TransactionHandler(
+        SqlConnectionStrings.ForManagedIdentity(o.SqlServer, o.SqlDatabase, o.ManagedIdentityClientId),
         sp.GetRequiredService<IQueueSender>(),
-        sp.GetRequiredService<IEventHubSender>()));
+        sp.GetRequiredService<IEventHubSender>());
+});
 
 builder.Services.AddSingleton<HealthState>();
 builder.Services.AddSingleton<ProcessorMetrics>();

@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.Json.Serialization;
 using System.Xml.Serialization;
 
 namespace TransactionProcessor;
@@ -10,7 +12,13 @@ namespace TransactionProcessor;
 public sealed class TransactionMessage
 {
     [XmlElement("transactionId")] public string? TransactionId { get; set; }
-    [XmlElement("itemId")] public long? ItemId { get; set; }
+
+    /// <summary>The raw <c>itemId</c> element text. Decoded as text so that an empty element is "missing" rather than a conversion error.</summary>
+    [XmlElement("itemId"), JsonIgnore] public string? ItemIdText { get; set; }
+
+    /// <summary>The numeric item key: null when the element is absent, blank or not a number. Serialised to JSON as <c>itemId</c>.</summary>
+    [XmlIgnore] public long? ItemId => long.TryParse(ItemIdText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) ? id : null;
+
     [XmlElement("skuId")] public string? SkuId { get; set; }
     [XmlElement("storeId")] public string? StoreId { get; set; }
     [XmlElement("registerId")] public string? RegisterId { get; set; }

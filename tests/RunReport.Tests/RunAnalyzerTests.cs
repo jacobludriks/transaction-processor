@@ -1,3 +1,5 @@
+using TransactionProcessor;
+
 namespace RunReport.Tests;
 
 /// <summary>
@@ -61,6 +63,18 @@ public class RunAnalyzerTests
     {
         Assert.True(Criterion(Analyze(new SyntheticRun { PublishTps = 300, ProcessTps = 295 }), "Sustained throughput").Passed);
         Assert.False(Criterion(Analyze(new SyntheticRun { PublishTps = 300, ProcessTps = 290 }), "Sustained throughput").Passed);
+    }
+
+    [Fact]
+    public void The_throughput_verdict_states_the_tolerance_whether_it_passes_or_fails()
+    {
+        var passing = Criterion(Analyze(new SyntheticRun { PublishTps = 300, ProcessTps = 300 }), "Sustained throughput");
+        var failing = Criterion(Analyze(new SyntheticRun { PublishTps = 300, ProcessTps = 250 }), "Sustained throughput");
+
+        Assert.Contains("2% tolerance", passing.Detail);
+        Assert.Contains("294", passing.Detail);
+        Assert.Contains("2% tolerance", failing.Detail);
+        Assert.Contains("294", failing.Detail);
     }
 
     [Fact]
@@ -132,10 +146,12 @@ public class RunAnalyzerTests
     }
 
     [Fact]
-    public void P95_passes_when_its_bucket_ends_at_or_below_2_seconds_and_fails_above()
+    public void P95_passes_when_its_bucket_ends_below_2_seconds_and_fails_when_it_ends_at_2_seconds_or_above()
     {
         Assert.True(Criterion(Analyze(new SyntheticRun()), "p95 latency under 2 s").Passed);
-        // 1% of messages over 2 s still leaves p95 at or under 2 s; 6% does not.
+        // 1% of messages over 2 s still leaves p95 in the bucket that ends at 1 s. A p95 in the bucket ending at exactly 2 s
+        // could be 2 s, and the spec says "under 2 seconds", so it fails; so does a p95 above 2 s.
+        Assert.False(Criterion(Analyze(new SyntheticRun { LatencyShares = [0.10, 0.40, 0.30, 0.10, 0.09, 0.01, 0.0] }), "p95 latency under 2 s").Passed);
         Assert.False(Criterion(Analyze(new SyntheticRun { LatencyShares = [0.10, 0.40, 0.30, 0.10, 0.04, 0.06, 0.0] }), "p95 latency under 2 s").Passed);
         Assert.False(Criterion(Analyze(new SyntheticRun { LatencyShares = [0.10, 0.40, 0.30, 0.10, 0.03, 0.02, 0.05] }), "p95 latency under 2 s").Passed);
     }
@@ -148,8 +164,8 @@ public class RunAnalyzerTests
         var export = run.Export();
         var slowEdges = export.LatencyBuckets
             .Concat([
-                new LatencyBucketSample(new DateTimeOffset(2026, 11, 17, 10, 1, 0, TimeSpan.Zero), "+Inf", 1_000_000),
-                new LatencyBucketSample(new DateTimeOffset(2026, 11, 17, 10, 13, 0, TimeSpan.Zero), "+Inf", 1_000_000),
+                new LatencyBucketSample(new DateTimeOffset(2026, 11, 17, 10, 1, 0, TimeSpan.Zero), LatencyBucketLabels.Overflow, 1_000_000),
+                new LatencyBucketSample(new DateTimeOffset(2026, 11, 17, 10, 13, 0, TimeSpan.Zero), LatencyBucketLabels.Overflow, 1_000_000),
             ]).ToList();
 
         var record = Analyze(run, export: export with { LatencyBuckets = slowEdges });
@@ -233,8 +249,8 @@ public class RunAnalyzerTests
             DeadLetterQueue = t => t >= new DateTimeOffset(2026, 11, 17, 10, 5, 0, TimeSpan.Zero) ? dlqAtEnd : 0,
         };
         var minute = new DateTimeOffset(2026, 11, 17, 10, 5, 0, TimeSpan.Zero);
-        if (itemNotFound > 0) run.ExtraOutcomes.Add(new OutcomeSample(minute, "dead_lettered", "ItemNotFound", itemNotFound));
-        if (invalidXml > 0) run.ExtraOutcomes.Add(new OutcomeSample(minute, "dead_lettered", "InvalidXml", invalidXml));
+        if (itemNotFound > 0) run.ExtraOutcomes.Add(new OutcomeSample(minute, MessageOutcomes.DeadLettered, DeadLetterReasons.ItemNotFound, itemNotFound));
+        if (invalidXml > 0) run.ExtraOutcomes.Add(new OutcomeSample(minute, MessageOutcomes.DeadLettered, DeadLetterReasons.InvalidXml, invalidXml));
         return run;
     }
 
@@ -244,8 +260,8 @@ public class RunAnalyzerTests
         var record = Analyze(WithDeadLetters(itemNotFound: 7, invalidXml: 2, dlqAtEnd: 9));
 
         Assert.Equal(9, record.Outcomes.DeadLettered);
-        Assert.Equal(7, record.Outcomes.DeadLetteredByReason["ItemNotFound"]);
-        Assert.Equal(2, record.Outcomes.DeadLetteredByReason["InvalidXml"]);
+        Assert.Equal(7, record.Outcomes.DeadLetteredByReason[DeadLetterReasons.ItemNotFound]);
+        Assert.Equal(2, record.Outcomes.DeadLetteredByReason[DeadLetterReasons.InvalidXml]);
     }
 
     [Fact]
@@ -260,7 +276,7 @@ public class RunAnalyzerTests
     [Fact]
     public void Dead_letters_for_reasons_the_run_expected_are_explained()
     {
-        var record = Analyze(WithDeadLetters(7, 2, 9), c => c with { ExpectedDeadLetterReasons = ["ItemNotFound", "InvalidXml"] });
+        var record = Analyze(WithDeadLetters(7, 2, 9), c => c with { ExpectedDeadLetterReasons = [DeadLetterReasons.ItemNotFound, DeadLetterReasons.InvalidXml] });
 
         Assert.Equal(0, record.DeadLetters.Unexplained);
         Assert.True(Criterion(record, "No unexplained dead-letters").Passed);
@@ -269,7 +285,7 @@ public class RunAnalyzerTests
     [Fact]
     public void Only_the_expected_reasons_are_explained()
     {
-        var record = Analyze(WithDeadLetters(7, 2, 9), c => c with { ExpectedDeadLetterReasons = ["InvalidXml"] });
+        var record = Analyze(WithDeadLetters(7, 2, 9), c => c with { ExpectedDeadLetterReasons = [DeadLetterReasons.InvalidXml] });
 
         Assert.Equal(7, record.DeadLetters.Unexplained);
         Assert.Equal(7, record.DeadLetters.UnexpectedReasons);
@@ -308,15 +324,15 @@ public class RunAnalyzerTests
     {
         var run = new SyntheticRun();
         var minute = new DateTimeOffset(2026, 11, 17, 10, 3, 0, TimeSpan.Zero);
-        run.ExtraOutcomes.Add(new OutcomeSample(minute, "abandoned", "transient_failure", 30));
-        run.ExtraOutcomes.Add(new OutcomeSample(minute.AddMinutes(1), "abandoned", "transient_failure", 12));
-        run.ExtraOutcomes.Add(new OutcomeSample(minute, "abandoned", "unhandled_exception", 1));
+        run.ExtraOutcomes.Add(new OutcomeSample(minute, MessageOutcomes.Abandoned, AbandonReasons.TransientFailure, 30));
+        run.ExtraOutcomes.Add(new OutcomeSample(minute.AddMinutes(1), MessageOutcomes.Abandoned, AbandonReasons.TransientFailure, 12));
+        run.ExtraOutcomes.Add(new OutcomeSample(minute, MessageOutcomes.Abandoned, AbandonReasons.UnhandledException, 1));
 
         var outcomes = Analyze(run).Outcomes;
 
         Assert.Equal(43, outcomes.Abandoned);
-        Assert.Equal(42, outcomes.AbandonedByReason["transient_failure"]);
-        Assert.Equal(1, outcomes.AbandonedByReason["unhandled_exception"]);
+        Assert.Equal(42, outcomes.AbandonedByReason[AbandonReasons.TransientFailure]);
+        Assert.Equal(1, outcomes.AbandonedByReason[AbandonReasons.UnhandledException]);
     }
 
     // ---- reconciliation ------------------------------------------------------------------------------------

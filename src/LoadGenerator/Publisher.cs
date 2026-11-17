@@ -40,7 +40,7 @@ public sealed class PublishOptions
     /// <summary>Largest number of messages handed to a sender in one go (and so, at most, one Service Bus batch).</summary>
     public int BatchSize { get; init; } = 100;
 
-    public double UnmatchedRatio { get; init; } = 0.10;
+    public double UnmatchedRatio { get; init; } = MessageGenerator.DefaultUnmatchedRatio;
 
     public int Seed { get; init; } = 12345;
 

@@ -12,7 +12,8 @@ public static class SeederCli
           DataSeeder --connection-string <connection string> [--items <n>] [--skus <n>]
           DataSeeder --server <name>.database.windows.net --database <db> --client-id <tooling identity client id> [--items <n>] [--skus <n>]
 
-        The second form signs in with the VM's user-assigned managed identity (no password). --items and --skus
+        The first form is for a local throwaway SQL Server container only. The second form signs in with the VM's
+        user-assigned managed identity (no password) and is the one to use against Azure. --items and --skus
         default to 1,000,000 each. Running again on a seeded database adds nothing.
         """;
 
@@ -44,15 +45,7 @@ public static class SeederCli
             {
                 if (server is null || database is null || clientId is null)
                     throw new ArgumentException("Give --connection-string, or all of --server, --database and --client-id.");
-                connectionString = new SqlConnectionStringBuilder
-                {
-                    DataSource = server,
-                    InitialCatalog = database,
-                    Authentication = SqlAuthenticationMethod.ActiveDirectoryManagedIdentity,
-                    UserID = clientId, // the managed identity's client ID; no secret is involved
-                    Encrypt = SqlConnectionEncryptOption.Mandatory,
-                    ConnectTimeout = 60,
-                }.ConnectionString;
+                connectionString = SqlConnectionStrings.ForManagedIdentity(server, database, clientId, connectTimeoutSeconds: 60);
             }
         }
         catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException)

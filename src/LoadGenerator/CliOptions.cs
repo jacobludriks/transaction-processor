@@ -4,24 +4,28 @@ namespace LoadGenerator;
 
 public sealed class CliOptions
 {
-    public const string Usage = """
+    // The one source of truth for the defaults shared with the publisher: a default PublishOptions.
+    private static readonly PublishOptions Defaults = new();
+    private const string DefaultTopic = "transactions-in";
+
+    public static readonly string Usage = string.Create(CultureInfo.InvariantCulture, $"""
         Usage:
           LoadGenerator load        [options]   publish load messages at a steady rate
           LoadGenerator functional  [options]   send the small labelled set of bad messages (once)
 
         Connection (not needed with --dry-run):
           --namespace <fqdn>          Service Bus namespace, e.g. mysb.servicebus.windows.net
-          --topic <name>              input topic (default transactions-in)
+          --topic <name>              input topic (default {DefaultTopic})
           --client-id <guid>          client ID of the managed identity to use (the tooling identity);
                                       omit to use the signed-in developer account
 
         Load mode:
-          --rate <msgs/sec>           target rate (default 300)
-          --duration <seconds>        how long to run (default 60)
-          --unmatched-ratio <0..1>    share of messages with an unknown SKU (default 0.10)
-          --senders <n>               concurrent senders (default 4)
-          --batch-size <n>            messages per send (default 100)
-          --seed <n>                  random seed (default 12345)
+          --rate <msgs/sec>           target rate (default {Defaults.Rate})
+          --duration <seconds>        how long to run (default {Defaults.Duration.TotalSeconds})
+          --unmatched-ratio <0..1>    share of messages with an unknown SKU (default {Defaults.UnmatchedRatio:0.00})
+          --senders <n>               concurrent senders (default {Defaults.Senders})
+          --batch-size <n>            messages per send (default {Defaults.BatchSize})
+          --seed <n>                  random seed (default {Defaults.Seed})
           --summary-file <path>       write a machine-readable run summary (JSON) for the measurement report
           --dry-run                   generate and pace, but send nothing (no Azure needed)
 
@@ -29,18 +33,18 @@ public sealed class CliOptions
           --include-missing-sku       also send one message with no skuId
           --include-unknown-item      also send one message whose itemId does not exist
           --dry-run                   print the messages' labels without sending
-        """;
+        """);
 
     public required string Mode { get; init; }
     public string? Namespace { get; init; }
-    public string Topic { get; init; } = "transactions-in";
+    public string Topic { get; init; } = DefaultTopic;
     public string? ClientId { get; init; }
-    public double Rate { get; init; } = 300;
-    public double DurationSeconds { get; init; } = 60;
-    public double UnmatchedRatio { get; init; } = 0.10;
-    public int Senders { get; init; } = 4;
-    public int BatchSize { get; init; } = 100;
-    public int Seed { get; init; } = 12345;
+    public double Rate { get; init; } = Defaults.Rate;
+    public double DurationSeconds { get; init; } = Defaults.Duration.TotalSeconds;
+    public double UnmatchedRatio { get; init; } = Defaults.UnmatchedRatio;
+    public int Senders { get; init; } = Defaults.Senders;
+    public int BatchSize { get; init; } = Defaults.BatchSize;
+    public int Seed { get; init; } = Defaults.Seed;
     public bool DryRun { get; init; }
     public string? SummaryFile { get; init; }
     public bool IncludeMissingSku { get; init; }
@@ -70,14 +74,14 @@ public sealed class CliOptions
         {
             Mode = args[0],
             Namespace = values.GetValueOrDefault("--namespace"),
-            Topic = values.GetValueOrDefault("--topic") ?? "transactions-in",
+            Topic = values.GetValueOrDefault("--topic") ?? DefaultTopic,
             ClientId = values.GetValueOrDefault("--client-id"),
-            Rate = Double(values, "--rate", 300),
-            DurationSeconds = Double(values, "--duration", 60),
-            UnmatchedRatio = Double(values, "--unmatched-ratio", 0.10),
-            Senders = (int)Double(values, "--senders", 4),
-            BatchSize = (int)Double(values, "--batch-size", 100),
-            Seed = (int)Double(values, "--seed", 12345),
+            Rate = Double(values, "--rate", Defaults.Rate),
+            DurationSeconds = Double(values, "--duration", Defaults.Duration.TotalSeconds),
+            UnmatchedRatio = Double(values, "--unmatched-ratio", Defaults.UnmatchedRatio),
+            Senders = (int)Double(values, "--senders", Defaults.Senders),
+            BatchSize = (int)Double(values, "--batch-size", Defaults.BatchSize),
+            Seed = (int)Double(values, "--seed", Defaults.Seed),
             DryRun = flags.Contains("--dry-run"),
             SummaryFile = values.GetValueOrDefault("--summary-file"),
             IncludeMissingSku = flags.Contains("--include-missing-sku"),

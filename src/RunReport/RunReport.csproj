@@ -12,4 +12,9 @@
     <InternalsVisibleTo Include="RunReport.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The outcome and reason names the host writes into its metrics are defined once, in the handler library. -->
+    <ProjectReference Include="..\TransactionProcessor\TransactionProcessor.csproj" />
+  </ItemGroup>
+
 </Project>

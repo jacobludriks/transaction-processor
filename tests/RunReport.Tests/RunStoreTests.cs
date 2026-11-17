@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TransactionProcessor;
 
 namespace RunReport.Tests;
 
@@ -84,6 +85,7 @@ public sealed class RunStoreTests : IDisposable
         Assert.Contains("| Max concurrent calls | 64 |", markdown);
         Assert.Contains("| Target publish rate | 300 msg/s |", markdown);
         Assert.Contains("| Sustained throughput | 300.0 TPS |", markdown);
+        Assert.Contains("2% tolerance", markdown);
         Assert.Contains("| Latency p50 | 0.250 s |", markdown);
         Assert.Contains("| Latency p95 | 1.000 s |", markdown);
         Assert.Contains("| Latency p99 | 2.000 s |", markdown);
@@ -105,8 +107,8 @@ public sealed class RunStoreTests : IDisposable
     {
         var run = new SyntheticRun { OutputsMissing = 9, DeadLetterQueue = t => t >= new DateTimeOffset(2026, 11, 17, 10, 5, 0, TimeSpan.Zero) ? 9 : 0 };
         var minute = new DateTimeOffset(2026, 11, 17, 10, 5, 0, TimeSpan.Zero);
-        run.ExtraOutcomes.Add(new OutcomeSample(minute, "dead_lettered", "ItemNotFound", 7));
-        run.ExtraOutcomes.Add(new OutcomeSample(minute, "dead_lettered", "InvalidXml", 2));
+        run.ExtraOutcomes.Add(new OutcomeSample(minute, MessageOutcomes.DeadLettered, DeadLetterReasons.ItemNotFound, 7));
+        run.ExtraOutcomes.Add(new OutcomeSample(minute, MessageOutcomes.DeadLettered, DeadLetterReasons.InvalidXml, 2));
 
         var markdown = File.ReadAllText(RunStore.Save(Record(run), _dir).MarkdownPath);
 

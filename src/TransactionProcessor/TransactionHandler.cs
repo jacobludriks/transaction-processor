@@ -20,8 +20,10 @@ public sealed class TransactionHandler(string sqlConnectionString, IQueueSender 
     {
         if (!TryDecode(xmlBody, out var message))
             return new HandlerOutcome.DeadLetter(DeadLetterReasons.InvalidXml);
-        if (message.ItemId is null)
+        if (string.IsNullOrWhiteSpace(message.ItemIdText))
             return new HandlerOutcome.DeadLetter(DeadLetterReasons.MissingItemId);
+        if (message.ItemId is null)
+            return new HandlerOutcome.DeadLetter(DeadLetterReasons.InvalidXml);
         if (string.IsNullOrWhiteSpace(message.SkuId))
             return new HandlerOutcome.DeadLetter(DeadLetterReasons.MissingSkuId);
 
@@ -86,23 +88,22 @@ public sealed class TransactionHandler(string sqlConnectionString, IQueueSender 
         return node.ToJsonString();
     }
 
-    private async Task<string?> FindExternalItemIdAsync(long itemId, CancellationToken cancellationToken)
-    {
-        await using var connection = new SqlConnection(sqlConnectionString);
-        await connection.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT ExternalItemId FROM dbo.Item WHERE ItemId = @itemId";
-        command.Parameters.AddWithValue("@itemId", itemId);
-        return (string?)await command.ExecuteScalarAsync(cancellationToken);
-    }
+    private async Task<string?> FindExternalItemIdAsync(long itemId, CancellationToken cancellationToken) =>
+        (string?)await QueryScalarAsync(
+            "SELECT ExternalItemId FROM dbo.Item WHERE ItemId = @key", itemId, cancellationToken);
 
-    private async Task<bool> SkuExistsAsync(string skuId, CancellationToken cancellationToken)
+    private async Task<bool> SkuExistsAsync(string skuId, CancellationToken cancellationToken) =>
+        (int)(await QueryScalarAsync(
+            "SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.Sku WHERE SkuId = @key) THEN 1 ELSE 0 END", skuId, cancellationToken))! == 1;
+
+    /// <summary>One lookup: opens its own connection (pooled), runs the query with its single <c>@key</c> parameter and returns the first column of the first row.</summary>
+    private async Task<object?> QueryScalarAsync(string sql, object key, CancellationToken cancellationToken)
     {
         await using var connection = new SqlConnection(sqlConnectionString);
         await connection.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.Sku WHERE SkuId = @skuId) THEN 1 ELSE 0 END";
-        command.Parameters.AddWithValue("@skuId", skuId);
-        return (int)(await command.ExecuteScalarAsync(cancellationToken))! == 1;
+        command.CommandText = sql;
+        command.Parameters.AddWithValue("@key", key);
+        return await command.ExecuteScalarAsync(cancellationToken);
     }
 }

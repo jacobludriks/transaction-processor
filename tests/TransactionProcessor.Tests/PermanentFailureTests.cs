@@ -57,6 +57,55 @@ public sealed class PermanentFailureTests(WslcSqlServerFixture sqlServer)
         Assert.Empty(eventHub.Sent);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Blank_itemId_is_dead_lettered_with_reason_MissingItemId(string blank)
+    {
+        await using var database = await sqlServer.CreateDatabaseAsync();
+        await database.AddItemAsync(SampleTransaction.ItemId, "EXT-ITEM-4711");
+        await database.AddSkuAsync(SampleTransaction.SkuId);
+        var queue = new FakeQueueSender();
+        var eventHub = new FakeEventHubSender();
+        var handler = new TransactionHandler(database.ConnectionString, queue, eventHub);
+
+        var outcome = await handler.HandleAsync(WithElementText(SampleTransaction.Xml(), "itemId", blank));
+
+        Assert.Equal(new HandlerOutcome.DeadLetter("MissingItemId"), outcome);
+        Assert.Empty(queue.Sent);
+        Assert.Empty(eventHub.Sent);
+    }
+
+    [Fact]
+    public async Task Non_numeric_itemId_is_dead_lettered_with_reason_InvalidXml()
+    {
+        await using var database = await sqlServer.CreateDatabaseAsync();
+        var handler = new TransactionHandler(database.ConnectionString, new FakeQueueSender(), new FakeEventHubSender());
+
+        var outcome = await handler.HandleAsync(WithElementText(SampleTransaction.Xml(), "itemId", "abc"));
+
+        Assert.Equal(new HandlerOutcome.DeadLetter("InvalidXml"), outcome);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Blank_skuId_is_dead_lettered_with_reason_MissingSkuId(string blank)
+    {
+        await using var database = await sqlServer.CreateDatabaseAsync();
+        await database.AddItemAsync(SampleTransaction.ItemId, "EXT-ITEM-4711");
+        await database.AddSkuAsync(SampleTransaction.SkuId);
+        var queue = new FakeQueueSender();
+        var eventHub = new FakeEventHubSender();
+        var handler = new TransactionHandler(database.ConnectionString, queue, eventHub);
+
+        var outcome = await handler.HandleAsync(WithElementText(SampleTransaction.Xml(), "skuId", blank));
+
+        Assert.Equal(new HandlerOutcome.DeadLetter("MissingSkuId"), outcome);
+        Assert.Empty(queue.Sent);
+        Assert.Empty(eventHub.Sent);
+    }
+
     [Fact]
     public async Task Item_with_no_row_is_dead_lettered_with_reason_ItemNotFound_and_nothing_is_sent_or_written()
     {
@@ -86,6 +135,9 @@ public sealed class PermanentFailureTests(WslcSqlServerFixture sqlServer)
         await reader.ReadAsync();
         return (reader.GetInt32(0), reader.GetInt32(1));
     }
+
+    private static string WithElementText(string xml, string name, string text) =>
+        Regex.Replace(xml, $"<{name}>.*?</{name}>", $"<{name}>{text}</{name}>");
 
     private static string WithoutElement(string xml, string name) =>
         Regex.Replace(xml, $"[ \t]*<{name}>.*?</{name}>\r?\n", "");

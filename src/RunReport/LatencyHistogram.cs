@@ -1,4 +1,5 @@
 using System.Globalization;
+using TransactionProcessor;
 
 namespace RunReport;
 
@@ -50,7 +51,7 @@ internal sealed class LatencyHistogram
     }
 
     private static double ParseBound(string le) =>
-        le.Equals("+Inf", StringComparison.OrdinalIgnoreCase) || le.Equals("Infinity", StringComparison.OrdinalIgnoreCase) || le.Equals("Inf", StringComparison.OrdinalIgnoreCase)
+        le.Equals(LatencyBucketLabels.Overflow, StringComparison.OrdinalIgnoreCase) || le.Equals("Infinity", StringComparison.OrdinalIgnoreCase) || le.Equals("Inf", StringComparison.OrdinalIgnoreCase)
             ? double.PositiveInfinity
             : double.Parse(le, NumberStyles.Float, CultureInfo.InvariantCulture);
 }

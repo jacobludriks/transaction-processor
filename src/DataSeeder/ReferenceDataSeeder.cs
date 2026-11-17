@@ -22,8 +22,8 @@ public static class ReferenceDataSeeder
         string CreateSql,
         string[] Columns,
         Func<long, object[]> Row,
-        string ReadStateSql,
-        Func<object?, long> KeyNumber);
+        string CountAndMaxKeySql,   // returns the row count and the highest key
+        Func<object?, long> MaxKeyAsNumber);   // the highest key as a number: 0 when empty, -1 when it is not one of ours
 
     private static readonly TableSpec ItemTable = new(
         "dbo.Item", "ItemId", ReferenceDataSchema.CreateItemTableSql,
@@ -60,8 +60,8 @@ public static class ReferenceDataSeeder
         await ExecuteAsync(connection,
             $"IF OBJECT_ID(N'{table.Table}', N'U') IS NULL BEGIN {table.CreateSql} END", ct);
 
-        var (count, max) = await ReadStateAsync(connection, table.ReadStateSql, ct);
-        var maxKey = table.KeyNumber(max);
+        var (count, max) = await ReadCountAndMaxKeyAsync(connection, table.CountAndMaxKeySql, ct);
+        var maxKey = table.MaxKeyAsNumber(max);
         var added = 0L;
         if (count < target)
         {
@@ -114,7 +114,7 @@ public static class ReferenceDataSeeder
         }
     }
 
-    private static async Task<(long Count, object? Max)> ReadStateAsync(SqlConnection connection, string sql, CancellationToken ct)
+    private static async Task<(long Count, object? Max)> ReadCountAndMaxKeyAsync(SqlConnection connection, string sql, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;

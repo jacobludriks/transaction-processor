@@ -18,11 +18,19 @@
 #
 # Each check prints PASS or FAIL. Exit code is 0 only if every check passed.
 # Test traffic: one message on the input topic, one on the output queue and one
-# event on the event hub (all with a small marker body), plus a scratch table
-# that is dropped at the end. Run this before the processor is started, or expect
-# the processor to dead-letter the topic message as unparseable XML. The receive
-# checks peek-lock the head message (if any) briefly; it is redelivered after the
-# lock expires.
+# event on the event hub, plus a scratch table that is dropped at the end. Every
+# probe carries the application property PocAccessCheck=true and a body that says
+# it is an access check, so it can be told apart from benchmark traffic.
+#
+# THE TOPIC PROBE WILL DEAD-LETTER. It is valid XML with no itemId, so once the
+# processor runs it is dead-lettered with reason MissingItemId. Run this before the
+# processor is started if you can, and either way ignore or purge that dead-letter
+# (and the probe in the output queue and event hub) before a benchmark run, so it
+# is not mistaken for an unexplained dead-letter. The receive checks peek-lock the
+# head message (if any) briefly; it is redelivered after the lock expires.
+#
+# Token audiences (Microsoft Entra resource): Service Bus https://servicebus.azure.net,
+# Event Hubs https://eventhubs.azure.net. The two services use different resources.
 set -uo pipefail
 
 SQL_SERVER=""; SERVICEBUS=""; EVENTHUBS=""
@@ -52,6 +60,8 @@ for v in SQL_SERVER SERVICEBUS EVENTHUBS PROCESSOR_CLIENT_ID TOOLING_CLIENT_ID; 
 done
 for c in curl jq sqlcmd; do command -v "$c" >/dev/null || { echo "$c not found." >&2; exit 1; }; done
 
+PROBE_XML="<poc-access-check>Access check from verify-access.sh, not a transaction. Ignore and purge.</poc-access-check>"
+PROBE_JSON='{"check":"poc-access-check","note":"Access check from verify-access.sh, not a transaction. Ignore and purge."}'
 FAILS=0
 pass() { echo "PASS  $1"; }
 fail() { echo "FAIL  $1  ($2)"; FAILS=$((FAILS+1)); }
@@ -63,15 +73,21 @@ imds_token() {
     | jq -r '.access_token // empty'
 }
 
+# Entra token resources (audiences) for the data planes.
+SB_AUDIENCE="https://servicebus.azure.net"
+EH_AUDIENCE="https://eventhubs.azure.net"
+
 # HTTP status of a request to Service Bus / Event Hubs as an identity.
-#   rest <client-id> <METHOD> <url> [body]
+#   rest <client-id> <audience> <METHOD> <url> [body]
+# Sends use the marker header PocAccessCheck (becomes an application property on the message / event).
 rest() {
-  local token; token="$(imds_token "$1" "https://servicebus.azure.net")"
+  local token; token="$(imds_token "$1" "$2")"
   [[ -n "$token" ]] || { echo "token"; return; }
-  curl -sS -m 30 -o /dev/null -w '%{http_code}' -X "$2" "$3" \
+  curl -sS -m 30 -o /dev/null -w '%{http_code}' -X "$3" "$4" \
     -H "Authorization: Bearer $token" \
+    -H "PocAccessCheck: true" \
     -H 'Content-Type: application/atom+xml;type=entry;charset=utf-8' \
-    --data "${4:-}" 2>/dev/null || echo "000"
+    --data "${5:-}" 2>/dev/null || echo "000"
 }
 
 # expect <label> <actual-status> <allowed statuses...>
@@ -84,19 +100,19 @@ sql_as() {   # sql_as <client-id> <query>
 
 echo "== Service Bus"
 SB="https://$SERVICEBUS"
-expect_ok      "tooling sends to topic $TOPIC"           "$(rest "$TOOLING_CLIENT_ID"   POST "$SB/$TOPIC/messages" '<poc-access-check/>')" 201
-expect_refused "processor sends to topic $TOPIC"         "$(rest "$PROCESSOR_CLIENT_ID" POST "$SB/$TOPIC/messages" '<poc-access-check/>')"
-expect_ok      "tooling reads subscription dead-letter"  "$(rest "$TOOLING_CLIENT_ID"   POST "$SB/$TOPIC/subscriptions/$SUBSCRIPTION/\$deadletterqueue/messages/head?timeout=5")" 200 201 204
-expect_ok      "tooling reads queue $QUEUE"              "$(rest "$TOOLING_CLIENT_ID"   POST "$SB/$QUEUE/messages/head?timeout=5")" 200 201 204
-expect_ok      "tooling reads queue dead-letter"         "$(rest "$TOOLING_CLIENT_ID"   POST "$SB/$QUEUE/\$deadletterqueue/messages/head?timeout=5")" 200 201 204
-expect_ok      "processor reads subscription $SUBSCRIPTION" "$(rest "$PROCESSOR_CLIENT_ID" POST "$SB/$TOPIC/subscriptions/$SUBSCRIPTION/messages/head?timeout=5")" 200 201 204
-expect_ok      "processor sends to queue $QUEUE"         "$(rest "$PROCESSOR_CLIENT_ID" POST "$SB/$QUEUE/messages" '{"check":"poc-access-check"}')" 201
-expect_refused "processor reads queue $QUEUE"            "$(rest "$PROCESSOR_CLIENT_ID" POST "$SB/$QUEUE/messages/head?timeout=5")"
+expect_ok      "tooling sends to topic $TOPIC"           "$(rest "$TOOLING_CLIENT_ID"   $SB_AUDIENCE POST "$SB/$TOPIC/messages" "$PROBE_XML")" 201
+expect_refused "processor sends to topic $TOPIC"         "$(rest "$PROCESSOR_CLIENT_ID" $SB_AUDIENCE POST "$SB/$TOPIC/messages" "$PROBE_XML")"
+expect_ok      "tooling reads subscription dead-letter"  "$(rest "$TOOLING_CLIENT_ID"   $SB_AUDIENCE POST "$SB/$TOPIC/subscriptions/$SUBSCRIPTION/\$deadletterqueue/messages/head?timeout=5")" 200 201 204
+expect_ok      "tooling reads queue $QUEUE"              "$(rest "$TOOLING_CLIENT_ID"   $SB_AUDIENCE POST "$SB/$QUEUE/messages/head?timeout=5")" 200 201 204
+expect_ok      "tooling reads queue dead-letter"         "$(rest "$TOOLING_CLIENT_ID"   $SB_AUDIENCE POST "$SB/$QUEUE/\$deadletterqueue/messages/head?timeout=5")" 200 201 204
+expect_ok      "processor reads subscription $SUBSCRIPTION" "$(rest "$PROCESSOR_CLIENT_ID" $SB_AUDIENCE POST "$SB/$TOPIC/subscriptions/$SUBSCRIPTION/messages/head?timeout=5")" 200 201 204
+expect_ok      "processor sends to queue $QUEUE"         "$(rest "$PROCESSOR_CLIENT_ID" $SB_AUDIENCE POST "$SB/$QUEUE/messages" "$PROBE_JSON")" 201
+expect_refused "processor reads queue $QUEUE"            "$(rest "$PROCESSOR_CLIENT_ID" $SB_AUDIENCE POST "$SB/$QUEUE/messages/head?timeout=5")"
 
 echo "== Event Hubs"
 EH="https://$EVENTHUBS"
-expect_ok      "processor sends to event hub"            "$(rest "$PROCESSOR_CLIENT_ID" POST "$EH/$EVENTHUB/messages?timeout=30" '{"check":"poc-access-check"}')" 201
-expect_refused "tooling sends to event hub"              "$(rest "$TOOLING_CLIENT_ID"   POST "$EH/$EVENTHUB/messages?timeout=30" '{"check":"poc-access-check"}')"
+expect_ok      "processor sends to event hub"            "$(rest "$PROCESSOR_CLIENT_ID" $EH_AUDIENCE POST "$EH/$EVENTHUB/messages?timeout=30" "$PROBE_JSON")" 201
+expect_refused "tooling sends to event hub"              "$(rest "$TOOLING_CLIENT_ID"   $EH_AUDIENCE POST "$EH/$EVENTHUB/messages?timeout=30" "$PROBE_JSON")"
 echo "NOTE  tooling receive on the event hub is an AMQP operation and is not testable with curl;"
 echo "      check it with the throwaway event hub reader, or inspect the role assignment in the portal."
 

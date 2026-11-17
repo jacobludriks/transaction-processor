@@ -28,8 +28,6 @@ public sealed class ProcessorMetrics
     public const string LatencyInstrument = "txproc.message.latency";
     public const string LatencyBucketInstrument = "txproc.message.latency.bucket";
 
-    public const string Overflow = "+Inf";
-
     /// <summary>
     /// Latency bucket upper bounds, in seconds. Dense around the 2 s p95 target (1 to 3 s) so that a p95 close to
     /// the target can be told apart from one that misses it; coarse above that, where only "far too slow" matters.
@@ -52,24 +50,23 @@ public sealed class ProcessorMetrics
         _latencyBuckets = Meter.CreateCounter<long>(LatencyBucketInstrument, "{message}", "Latency counted per bucket upper bound (le)");
     }
 
-    public void SentToQueue(double latencySeconds) => Sent("sent_to_queue", "queue", latencySeconds);
+    /// <param name="latencySeconds">Enqueue-to-output-sent latency, or null when the enqueue time is unknown (the message is then counted but adds no latency sample).</param>
+    public void SentToQueue(double? latencySeconds = null) => Sent(MessageOutcomes.SentToQueue, "queue", latencySeconds);
 
-    public void SentToEventHub(double latencySeconds) => Sent("sent_to_event_hub", "event_hub", latencySeconds);
-
-    public void SentToQueue() => _messages.Add(1, new TagList { { "outcome", "sent_to_queue" } });
-
-    public void SentToEventHub() => _messages.Add(1, new TagList { { "outcome", "sent_to_event_hub" } });
+    /// <inheritdoc cref="SentToQueue"/>
+    public void SentToEventHub(double? latencySeconds = null) => Sent(MessageOutcomes.SentToEventHub, "event_hub", latencySeconds);
 
     public void DeadLettered(string reason) =>
-        _messages.Add(1, new TagList { { "outcome", "dead_lettered" }, { "reason", reason } });
+        _messages.Add(1, new TagList { { "outcome", MessageOutcomes.DeadLettered }, { "reason", reason } });
 
     public void Abandoned(string reason) =>
-        _messages.Add(1, new TagList { { "outcome", "abandoned" }, { "reason", reason } });
+        _messages.Add(1, new TagList { { "outcome", MessageOutcomes.Abandoned }, { "reason", reason } });
 
-    private void Sent(string outcome, string destination, double latencySeconds)
+    private void Sent(string outcome, string destination, double? latencySeconds)
     {
         _messages.Add(1, new TagList { { "outcome", outcome } });
-        var seconds = Math.Max(0, latencySeconds);
+        if (latencySeconds is not { } latency) return;
+        var seconds = Math.Max(0, latency);
         _latency.Record(seconds, new TagList { { "destination", destination } });
         _latencyBuckets.Add(1, new TagList { { "le", BucketLabel(seconds) }, { "destination", destination } });
     }
@@ -78,7 +75,7 @@ public sealed class ProcessorMetrics
     {
         for (var i = 0; i < LatencyBucketBoundariesSeconds.Length; i++)
             if (seconds <= LatencyBucketBoundariesSeconds[i]) return BucketLabels[i];
-        return Overflow;
+        return LatencyBucketLabels.Overflow;
     }
 
     private static string Format(double seconds) => seconds.ToString("0.###", CultureInfo.InvariantCulture);

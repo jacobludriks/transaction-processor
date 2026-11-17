@@ -16,11 +16,14 @@ dotnet run -c Release --project src/DataSeeder -- \
 
 The server name resolves to the private endpoint from inside the VNet. `--items` and `--skus` override the default of 1,000,000 each. Run it once after each deployment (the database is empty after a teardown and rebuild). Exit code 0 means success.
 
-## Run it locally against a SQL Server container
+## Run it locally against a SQL Server container (local testing only)
+
+The plain `--connection-string` option exists only for a throwaway SQL Server container on the developer machine (the `wslc` container the tests and local timing use), where the `sa` password is a disposable value that exists nowhere else. **Never use it against the Azure SQL database**; on the VM use the managed identity form above, which takes no password.
 
 ```bash
+# Local throwaway container only. The password is the container's own, read from an environment variable rather than typed on the command line or committed.
 dotnet run -c Release --project src/DataSeeder -- \
-  --connection-string "Server=127.0.0.1,<port>;User Id=sa;Password=<pw>;TrustServerCertificate=True;Encrypt=Optional;Initial Catalog=<db>"
+  --connection-string "Server=127.0.0.1,<port>;User Id=sa;Password=$LOCAL_SA_PASSWORD;TrustServerCertificate=True;Encrypt=Optional;Initial Catalog=<db>"
 ```
 
 The database must already exist. Do not commit connection strings.
