@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] A database failure during either lookup gives a "retry" outcome
 - [x] A failed send to the queue gives a "retry" outcome
