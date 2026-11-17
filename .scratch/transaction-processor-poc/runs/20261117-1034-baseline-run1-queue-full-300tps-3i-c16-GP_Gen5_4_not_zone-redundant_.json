@@ -1,0 +1,135 @@
+{
+  "id": "20261117-1034-baseline-run1-queue-full-300tps-3i-c16-GP_Gen5_4_not_zone-redundant_",
+  "recordedAtUtc": "2026-11-17T10:56:10.9839759+00:00",
+  "configuration": {
+    "name": "baseline-run1-queue-full",
+    "instanceCount": 3,
+    "maxConcurrentCalls": 16,
+    "prefetchCount": 32,
+    "databaseTier": "GP_Gen5_4 (not zone-redundant)",
+    "targetPublishRate": 300,
+    "startUtc": "2026-11-17T10:34:49.7015756+00:00",
+    "endUtc": "2026-11-17T10:48:50.0405337+00:00",
+    "expectedDeadLetterReasons": [],
+    "notes": "Run 1. Output queue hit its 1 GB size cap at 10:48:38 (no consumer); last ~12 s of sends failed, 251 messages dead-lettered by Service Bus after 10 deliveries. Cap raised to 40 GB afterwards."
+  },
+  "generator": {
+    "sent": 252000,
+    "failed": 0,
+    "targetRate": 300,
+    "achievedRate": 299.87899236490244,
+    "heldTargetRate": true
+  },
+  "window": {
+    "startUtc": "2026-11-17T10:36:00+00:00",
+    "endUtc": "2026-11-17T10:47:00+00:00",
+    "durationSeconds": 660,
+    "expectedBins": 11,
+    "binsWithData": 11,
+    "runDurationSeconds": 840.3389581
+  },
+  "throughput": {
+    "outputsInWindow": 198035,
+    "sustainedTps": 300.0530303030303,
+    "minBinTps": 299.21666666666664,
+    "maxBinTps": 300.6,
+    "perBinTps": [
+      299.8,
+      299.96666666666664,
+      300.51666666666665,
+      300.6,
+      299.8,
+      300.06666666666666,
+      300.0833333333333,
+      299.21666666666664,
+      300.3666666666667,
+      300.1,
+      300.06666666666666
+    ]
+  },
+  "backlog": {
+    "hasData": true,
+    "atWindowStart": 128,
+    "atWindowEnd": 65,
+    "max": 128,
+    "slopePerSecond": -0.07545454545454545,
+    "growthOverWindow": -49.8,
+    "growthThreshold": 600,
+    "grew": false,
+    "atEndOfData": 0
+  },
+  "latency": {
+    "sampleCount": 198035,
+    "p50Seconds": 0.07624220970375686,
+    "p95Seconds": 0.13486737032150548,
+    "p99Seconds": 0.18987327268939655,
+    "p50UpperBoundSeconds": 0.1,
+    "p95UpperBoundSeconds": 0.2,
+    "p99UpperBoundSeconds": 0.2
+  },
+  "outcomes": {
+    "sentToQueue": 227229,
+    "sentToEventHub": 24826,
+    "deadLettered": 0,
+    "abandoned": 2861,
+    "deadLetteredByReason": {},
+    "abandonedByReason": {
+      "transient_failure": 2861
+    }
+  },
+  "deadLetters": {
+    "countedByHost": 0,
+    "unexpectedReasons": 0,
+    "serverSideDataAvailable": true,
+    "serverSideGrowth": 251,
+    "serverSideUnaccounted": 251,
+    "unexplained": 251
+  },
+  "reconciliation": {
+    "generatorSent": 252000,
+    "sentToQueue": 227229,
+    "sentToEventHub": 24826,
+    "deadLettered": 0,
+    "deadLetteredByServiceBus": 251,
+    "stillInBacklog": 0,
+    "accounted": 252306,
+    "lost": 0,
+    "duplicates": 306
+  },
+  "verdict": {
+    "meetsGoCriteria": false,
+    "criteria": [
+      {
+        "name": "Sustained throughput",
+        "passed": true,
+        "detail": "Sustained 300.1 TPS over 660 s (lowest minute 299.2 TPS). The bar is 294 TPS: 300 TPS less a 2% tolerance."
+      },
+      {
+        "name": "Backlog not growing",
+        "passed": true,
+        "detail": "The backlog trend is -0.08/s (-50 over the window, limit 600); peak 128."
+      },
+      {
+        "name": "p95 latency under 2 s",
+        "passed": true,
+        "detail": "p95 is about 0.135 s (at most 0.2 s); the limit is 2 s. The verdict uses the bucket\u0027s upper bound."
+      },
+      {
+        "name": "Zero lost messages",
+        "passed": true,
+        "detail": "Generator sent 252,000; outputs 252,055 (queue 227,229, event hub 24,826), dead-lettered 251; none lost; 306 more outputs than messages sent (duplicates from at-least-once delivery)."
+      },
+      {
+        "name": "No unexplained dead-letters",
+        "passed": false,
+        "detail": "251 unexplained: 0 counted by the host for reasons this run did not expect, 251 added to the dead-letter queue that the host did not count (most likely maximum delivery count exceeded)."
+      },
+      {
+        "name": "Generator held the target rate",
+        "passed": true,
+        "detail": "Generator achieved 299.9 msg/s against a target of 300."
+      }
+    ],
+    "warnings": []
+  }
+}

@@ -1,0 +1,133 @@
+{
+  "id": "20261117-1057-baseline-run2-300tps-3i-c16-GP_Gen5_4_not_zone-redundant_",
+  "recordedAtUtc": "2026-11-17T11:14:10.2917609+00:00",
+  "configuration": {
+    "name": "baseline-run2",
+    "instanceCount": 3,
+    "maxConcurrentCalls": 16,
+    "prefetchCount": 32,
+    "databaseTier": "GP_Gen5_4 (not zone-redundant)",
+    "targetPublishRate": 300,
+    "startUtc": "2026-11-17T10:57:01.1992976+00:00",
+    "endUtc": "2026-11-17T11:11:01.5318963+00:00",
+    "expectedDeadLetterReasons": [],
+    "notes": "Run 2 (clean rerun). Output queue cap raised to 40 GB and dead-letters drained beforehand. Azure SQL General Purpose 4 vCores NOT zone-redundant; App Service P1v3 x3 zone-redundant; Service Bus Premium 1 MU; public network access disabled, private endpoints."
+  },
+  "generator": {
+    "sent": 252000,
+    "failed": 0,
+    "targetRate": 300,
+    "achievedRate": 299.88126176450334,
+    "heldTargetRate": true
+  },
+  "window": {
+    "startUtc": "2026-11-17T10:59:00+00:00",
+    "endUtc": "2026-11-17T11:10:00+00:00",
+    "durationSeconds": 660,
+    "expectedBins": 11,
+    "binsWithData": 11,
+    "runDurationSeconds": 840.3325987
+  },
+  "throughput": {
+    "outputsInWindow": 198008,
+    "sustainedTps": 300.0121212121212,
+    "minBinTps": 299.6166666666667,
+    "maxBinTps": 300.35,
+    "perBinTps": [
+      299.8,
+      300.35,
+      300.03333333333336,
+      300.1666666666667,
+      299.73333333333335,
+      299.9166666666667,
+      300.1166666666667,
+      300.03333333333336,
+      299.6166666666667,
+      300.05,
+      300.31666666666666
+    ]
+  },
+  "backlog": {
+    "hasData": true,
+    "atWindowStart": 73,
+    "atWindowEnd": 62,
+    "max": 95,
+    "slopePerSecond": -0.02590909090909091,
+    "growthOverWindow": -17.1,
+    "growthThreshold": 600,
+    "grew": false,
+    "atEndOfData": 0
+  },
+  "latency": {
+    "sampleCount": 198008,
+    "p50Seconds": 0.07795429946573323,
+    "p95Seconds": 0.15832370480805058,
+    "p99Seconds": 0.19522418934029065,
+    "p50UpperBoundSeconds": 0.1,
+    "p95UpperBoundSeconds": 0.2,
+    "p99UpperBoundSeconds": 0.2
+  },
+  "outcomes": {
+    "sentToQueue": 227217,
+    "sentToEventHub": 24783,
+    "deadLettered": 0,
+    "abandoned": 0,
+    "deadLetteredByReason": {},
+    "abandonedByReason": {}
+  },
+  "deadLetters": {
+    "countedByHost": 0,
+    "unexpectedReasons": 0,
+    "serverSideDataAvailable": true,
+    "serverSideGrowth": 0,
+    "serverSideUnaccounted": 0,
+    "unexplained": 0
+  },
+  "reconciliation": {
+    "generatorSent": 252000,
+    "sentToQueue": 227217,
+    "sentToEventHub": 24783,
+    "deadLettered": 0,
+    "deadLetteredByServiceBus": 0,
+    "stillInBacklog": 0,
+    "accounted": 252000,
+    "lost": 0,
+    "duplicates": 0
+  },
+  "verdict": {
+    "meetsGoCriteria": true,
+    "criteria": [
+      {
+        "name": "Sustained throughput",
+        "passed": true,
+        "detail": "Sustained 300 TPS over 660 s (lowest minute 299.6 TPS). The bar is 294 TPS: 300 TPS less a 2% tolerance."
+      },
+      {
+        "name": "Backlog not growing",
+        "passed": true,
+        "detail": "The backlog trend is -0.03/s (-17 over the window, limit 600); peak 95."
+      },
+      {
+        "name": "p95 latency under 2 s",
+        "passed": true,
+        "detail": "p95 is about 0.158 s (at most 0.2 s); the limit is 2 s. The verdict uses the bucket\u0027s upper bound."
+      },
+      {
+        "name": "Zero lost messages",
+        "passed": true,
+        "detail": "Generator sent 252,000; outputs 252,000 (queue 227,217, event hub 24,783), dead-lettered 0; none lost."
+      },
+      {
+        "name": "No unexplained dead-letters",
+        "passed": true,
+        "detail": "No dead-letters."
+      },
+      {
+        "name": "Generator held the target rate",
+        "passed": true,
+        "detail": "Generator achieved 299.9 msg/s against a target of 300."
+      }
+    ],
+    "warnings": []
+  }
+}

@@ -4,10 +4,10 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A database failure during either lookup gives a "retry" outcome
-- [ ] A failed send to the queue gives a "retry" outcome
-- [ ] A failed send to the event hub gives a "retry" outcome
-- [ ] A transient failure is never classed as a dead-letter or a success
-- [ ] The tests simulate the faults through the fake senders and through a database that is unreachable, not through internal hooks
+- [x] A database failure during either lookup gives a "retry" outcome
+- [x] A failed send to the queue gives a "retry" outcome
+- [x] A failed send to the event hub gives a "retry" outcome
+- [x] A transient failure is never classed as a dead-letter or a success
+- [x] The tests simulate the faults through the fake senders and through a database that is unreachable, not through internal hooks
