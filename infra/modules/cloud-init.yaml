@@ -25,12 +25,15 @@ write_files:
       ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet
       echo 'export DOTNET_CLI_TELEMETRY_OPTOUT=1' > /etc/profile.d/dotnet.sh
 
-      # sqlcmd (go-sqlcmd supports Entra / managed identity auth) from the Microsoft repo.
-      curl -sSL -o /tmp/packages-microsoft-prod.deb \
-        https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb
-      dpkg -i /tmp/packages-microsoft-prod.deb
-      apt-get update
-      ACCEPT_EULA=Y apt-get install -y sqlcmd
+      # sqlcmd: the Go sqlcmd (supports Entra / managed identity auth), pinned release from GitHub.
+      # The Microsoft apt repo for Ubuntu 24.04 only carries the older ODBC mssql-tools18, so
+      # `apt-get install sqlcmd` fails there (found on the first live deployment).
+      apt-get install -y bzip2
+      curl -sSL -o /tmp/sqlcmd.tar.bz2 \
+        https://github.com/microsoft/go-sqlcmd/releases/download/v1.10.0/sqlcmd-linux-amd64.tar.bz2
+      mkdir -p /tmp/sqlcmd-x
+      tar -xjf /tmp/sqlcmd.tar.bz2 -C /tmp/sqlcmd-x
+      install -m 0755 /tmp/sqlcmd-x/sqlcmd /usr/local/bin/sqlcmd
 
       # Azure CLI, for `az login --identity` and inspection from the VM.
       curl -sL https://aka.ms/InstallAzureCLIDeb | bash
