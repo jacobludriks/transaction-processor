@@ -16,13 +16,17 @@ Subscription-scope Bicep for the transaction processor POC. One command deploys,
 | `modules/service-bus.bicep` | Service Bus Premium, 1 messaging unit, zone-redundant, public access disabled, local (SAS) auth disabled. One topic, one subscription (no filters, max delivery count 10) and the output queue. Includes its private endpoint. |
 | `modules/event-hubs.bicep` | Event Hubs Standard, 1 throughput unit, auto-inflate off, zone-redundant, public access disabled, local auth disabled. One event hub with 2 partitions. Includes its private endpoint. |
 | `modules/private-endpoint.bicep` | Reusable private endpoint plus private DNS zone group, registering in the existing zone from the network module. |
+| `modules/identities.bicep` | The processor and tooling user-assigned managed identities (name, id, client ID and principal ID as outputs). |
+| `modules/role-assignments.bicep` | Built-in data-plane roles for both identities, scoped to the topic, subscription, queue and event hub (table in "Identities, roles and SQL users"). |
+| `scripts/vm/setup-sql-users.sh`, `setup-sql-users.sql` | Run on the VM as the Entra admin: creates a contained SQL user per identity and grants roles. Idempotent. |
+| `scripts/vm/verify-access.sh` | Run on the VM: proves each identity can do what it should and is refused the rest. |
 | `scripts/deploy.ps1` | One-command deploy (or `-WhatIf`). |
 | `scripts/teardown.ps1` | One-command delete of the resource group. |
 
 ### Data services (ticket 06)
 
 - Names (in `main.bicep`, `names`): SQL server `txproc-sql-<suffix>`, database `txproc`, Service Bus `txproc-sb-<suffix>` with topic `transactions-in`, subscription `processor` and queue `transactions-recognised`, Event Hubs `txproc-eh-<suffix>` with event hub `transactions-unrecognised`. The suffix is `uniqueSuffix`. Deployment outputs list the names and FQDNs.
-- **SQL admin, no password.** The server is Entra-only. `deploy.ps1` takes `-SqlAdminObjectId` and `-SqlAdminName` (Entra object id and name of the admin user or group). Ticket 07 connects as this admin from the VM to create the identities as SQL users. The tooling VM needs to be able to sign in as that admin (for example `az login` as that user, then `sqlcmd -G`).
+- **SQL admin, no password.** The server is Entra-only. `deploy.ps1` takes `-SqlAdminObjectId` and `-SqlAdminName` (Entra object id and name of the admin user or group). Ticket 07 connects as this admin from the VM to create the identities as SQL users (`az login` as that user, then `scripts/vm/setup-sql-users.sh`).
 - **Scaling SQL between runs.** Redeploy with a different capacity, for example `deploy.ps1 ... -SqlSkuCapacity 8`. The value flows through `POC_SQL_SKU_CAPACITY` into `sqlSkuCapacity` in `main.bicepparam`; nothing else is rebuilt. Tier, family and name are the `sqlSku*` parameters in the same file. Note that a scale operation on SQL Database can briefly drop connections, and zone redundancy must stay supported at the target size.
 - **Service Bus "no filters".** No rule is declared on the subscription, so Service Bus creates its own `$Default` rule that matches every message. The subscription therefore receives all messages. The default maximum delivery count of 10 is also set explicitly on the subscription and the queue so it is visible and checkable.
 - **No connection strings.** Local (SAS) authentication is disabled on Service Bus and Event Hubs, so only managed identities can authenticate (ticket 07 assigns the roles).
@@ -30,7 +34,84 @@ Subscription-scope Bicep for the transaction processor POC. One command deploys,
 
 ### Extending (tickets 07, 08)
 
-Add modules to `main.bicep` at the `SEAM` comments and new parameters to `main.bicepparam`. Do not restructure the foundation. Outputs you can use: `network.outputs.privateEndpointSubnetId`, `appServiceSubnetId`, `serviceBusDnsZoneId`, `sqlDnsZoneId`, and `uniqueSuffix` for globally unique names. The tooling VM already accepts the tooling identity through `userAssignedIdentityIds`.
+Add modules to `main.bicep` at the `SEAM` comments and new parameters to `main.bicepparam`. Do not restructure the foundation. Outputs you can use: `network.outputs.privateEndpointSubnetId`, `appServiceSubnetId`, `serviceBusDnsZoneId`, `sqlDnsZoneId`, and `uniqueSuffix` for globally unique names. Ticket 07 is in place: use `identities.outputs.processorIdentityId` and `processorIdentityClientId` to attach the processor identity to the App Service and point the app at it.
+
+## Identities, roles and SQL users (ticket 07)
+
+Two user-assigned managed identities replace every connection string and password. The processor identity is for the App Service (ticket 08, which attaches it and points the app at it by **client ID**). The tooling identity is for the tooling VM. Their names are `txproc-processor-id` and `txproc-tooling-id` (`names` in `main.bicep`) and are also the SQL user names.
+
+### What Bicep creates
+
+`modules/identities.bicep` creates both identities. `modules/role-assignments.bicep` assigns built-in roles, each scoped to the single resource needed (no namespace-wide or resource-group assignments):
+
+| Identity | Role | Scope |
+|---|---|---|
+| Processor | Azure Service Bus Data Receiver | the input topic's subscription `processor` |
+| Processor | Azure Service Bus Data Sender | the output queue `transactions-recognised` |
+| Processor | Azure Event Hubs Data Sender | the event hub `transactions-unrecognised` |
+| Tooling | Azure Service Bus Data Sender | the input topic `transactions-in` |
+| Tooling | Azure Service Bus Data Receiver | the subscription `processor` (reads its dead-letter queue) |
+| Tooling | Azure Service Bus Data Receiver | the output queue (reads it and its dead-letter queue) |
+| Tooling | Azure Event Hubs Data Receiver | the event hub |
+
+Role definition GUIDs (checked against Microsoft's built-in roles reference, the Integration and Analytics categories): Service Bus Data Sender `69a216fc-b8fb-44d8-bc22-1f3c2cd27a39`, Service Bus Data Receiver `4f6d3b9b-027b-4f4c-9142-0e5a2a2247e0`, Event Hubs Data Sender `2b629674-e913-4c01-ae53-ef4638d8f975`, Event Hubs Data Receiver `a638d3c7-ab3a-418d-83e6-5f17a39d4fde`.
+
+Outputs for later tickets: `processorIdentityId`, `processorIdentityName`, `processorIdentityClientId`, `processorIdentityPrincipalId` and the same four for the tooling identity. Ticket 08 needs `processorIdentityId` and `processorIdentityClientId`.
+
+The tooling identity is attached to the VM. The processor identity is **also** attached to the VM by default (`attachProcessorIdentityToVm`, default `true`), because the acceptance check "using the processor identity, a write is refused" must run from the VM. The processor identity cannot do anything the tooling identity cannot, except receive on the subscription and send to the queue and event hub. Set the parameter to `false` and redeploy to take it off the VM afterwards.
+
+### Who is the SQL admin
+
+The SQL server is Entra-only. Its administrator is the user or group passed to `deploy.ps1` as `-SqlAdminObjectId` and `-SqlAdminName`. The deployment output `sqlEntraAdminName` shows who it is. Only this admin can create the users below. Nothing else (no SQL password, no `sa`) exists.
+
+### Create the SQL users (from the VM, as the Entra admin)
+
+Copy the scripts to the VM and run the setup as the admin. Nothing is run against Azure by the repository itself.
+
+```bash
+# from the laptop (the VM public IP and admin user are deployment outputs)
+scp -r infra/scripts/vm poc@<vm-ip>:~/vm-scripts
+ssh poc@<vm-ip>
+
+# on the VM, as the Entra admin
+az login --use-device-code          # sign in as the SQL admin, not with --identity
+cd ~/vm-scripts && chmod +x *.sh
+./setup-sql-users.sh \
+  --server <sql>.database.windows.net \
+  --processor-name txproc-processor-id \
+  --tooling-name txproc-tooling-id
+```
+
+It connects as the admin (and aborts if it finds it connected as a managed identity), creates a contained user for each identity with `CREATE USER ... FROM EXTERNAL PROVIDER`, then grants:
+
+- processor: `db_datareader` only. If it ever holds `db_datawriter` or `db_ddladmin`, the script removes them.
+- tooling: `db_datareader`, `db_datawriter` and `db_ddladmin` (the seeder in ticket 09 creates the item and SKU tables and their indexes).
+
+It is idempotent: run it again at any time. It ends by listing each user and its roles. No password is used.
+
+**If `FROM EXTERNAL PROVIDER` fails** with an error such as "Failed to find Entra principal" or "server identity does not have permission to read the directory", the SQL server cannot look names up in Entra (it needs a server identity with the Directory Readers role or the Microsoft Graph permissions, which Bicep cannot grant). Rerun with `--use-sid --processor-client-id <guid> --tooling-client-id <guid>` (the client IDs are deployment outputs). The users are then created from the client ID and need no directory lookup; the result is the same contained users.
+
+### Verify (from the VM)
+
+```bash
+./verify-access.sh \
+  --sql-server <sql>.database.windows.net \
+  --servicebus <sb>.servicebus.windows.net \
+  --eventhubs  <eh>.servicebus.windows.net \
+  --processor-client-id <processorIdentityClientId> \
+  --tooling-client-id   <toolingIdentityClientId>
+```
+
+It prints PASS or FAIL per check and exits non-zero on any failure. Run it before the processor is started. It gets tokens for each identity from the VM's identity endpoint and calls the Service Bus and Event Hubs REST endpoints, and signs in to SQL with `sqlcmd --authentication-method ActiveDirectoryManagedIdentity -U <client id>`. It checks:
+
+- tooling sends to the topic (accepted), and the processor cannot (401/403);
+- tooling can read the subscription, the queue and both dead-letter queues; the processor can read the subscription but not the queue;
+- processor sends to the queue and event hub; tooling cannot send to the event hub;
+- tooling creates a scratch table and writes a row; the processor can read it, its insert is refused (`permission was denied`), and it cannot create a table. The scratch table is dropped at the end (`--keep` leaves it).
+
+Event Hubs receive is an AMQP operation, so "tooling can receive from the event hub" is not covered by curl. Confirm it with the throwaway event hub reader, or check the role assignment on the event hub in the portal.
+
+The setup and verify scripts, and the REST and `sqlcmd` behaviours they rely on (for example `AZURE_TOKEN_CREDENTIALS=AzureCLICredential` being honoured by the installed `sqlcmd`, and bearer-token REST calls through the private endpoints), have been syntax-checked only. They have not run against Azure.
 
 ## Commands
 
@@ -165,3 +246,11 @@ Expected: one subscription, `maxDeliveryCount` 10, one `$Default` rule that is a
 | Public network access `Disabled` on all three | not yet checked | | |
 | Service Bus: one subscription, `$Default` rule only, max delivery count 10 | not yet checked | | |
 | SQL scale by parameter | not yet checked | | |
+| Identities, roles and SQL users (ticket 07): what-if shows 2 identities and 7 role assignments | not yet checked | | |
+| Role assignments visible on the topic, subscription, queue and event hub (`az role assignment list --scope ...`) | not yet checked | | |
+| `setup-sql-users.sh` creates both SQL users (by name, or `--use-sid` fallback) and is idempotent on rerun | not yet checked | | note which mode was needed |
+| Tooling identity: send to topic, read queue and dead-letter queues, write a SQL row | not yet checked | | `verify-access.sh` |
+| Tooling identity: receive from the event hub | not yet checked | | needs the event hub reader (AMQP) |
+| Processor identity: SQL read allowed, SQL write refused | not yet checked | | `verify-access.sh` |
+| Processor identity: receive on subscription, send to queue and event hub; send to topic refused | not yet checked | | `verify-access.sh` |
+| No connection string or password in any template, script or setting | not yet checked | | grep the repo and the deployed app settings |
