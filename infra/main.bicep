@@ -66,6 +66,28 @@ param budgetContactEmails array
 @description('First day of the month the budget starts in (budgets must start on the first of a month).')
 param budgetStartDate string = utcNow('yyyy-MM-01')
 
+// Data services (ticket 06)
+
+@description('Entra object id of the SQL admin (a user or group). SQL uses Entra-only authentication, so there is no SQL password. Ticket 07 runs from the VM as this admin to create the identities as SQL users.')
+@minLength(36)
+param sqlEntraAdminObjectId string
+
+@description('Entra display name (login) of the SQL admin, for example the admin user principal name.')
+@minLength(1)
+param sqlEntraAdminName string
+
+@description('SQL database SKU name. Change together with sqlSkuTier, sqlSkuFamily and sqlSkuCapacity to scale between runs.')
+param sqlSkuName string = 'GP_Gen5'
+
+@description('SQL database SKU tier.')
+param sqlSkuTier string = 'GeneralPurpose'
+
+@description('SQL database hardware family.')
+param sqlSkuFamily string = 'Gen5'
+
+@description('SQL database vCores. Redeploy with a different value (for example 6 or 8) to scale between benchmark runs.')
+param sqlSkuCapacity int = 4
+
 @description('Tags applied to the resource group and resources.')
 param tags object = {
   workload: 'transaction-processor-poc'
@@ -83,6 +105,15 @@ var names = {
   vnet: '${namePrefix}-vnet'
   toolingVm: '${namePrefix}-tools-vm'
   budget: '${namePrefix}-budget'
+  // Data services (ticket 06). Globally unique names carry the suffix.
+  sqlServer: '${namePrefix}-sql-${uniqueSuffix}'
+  sqlDatabase: 'txproc'
+  serviceBus: '${namePrefix}-sb-${uniqueSuffix}'
+  serviceBusTopic: 'transactions-in'
+  serviceBusSubscription: 'processor'
+  serviceBusQueue: 'transactions-recognised'
+  eventHubs: '${namePrefix}-eh-${uniqueSuffix}'
+  eventHub: 'transactions-unrecognised'
 }
 
 // ---------------------------------------------------------------------------
@@ -145,16 +176,66 @@ module budget 'modules/budget.bicep' = {
 }
 
 // ---------------------------------------------------------------------------
+// Data services (ticket 06): SQL, Service Bus, Event Hubs. Each has public
+// network access disabled and a private endpoint in the private-endpoint
+// subnet, registered in the existing private DNS zones.
+// ---------------------------------------------------------------------------
+
+module sql 'modules/sql.bicep' = {
+  name: 'sql'
+  scope: rg
+  params: {
+    location: location
+    tags: tags
+    serverName: names.sqlServer
+    databaseName: names.sqlDatabase
+    entraAdminObjectId: sqlEntraAdminObjectId
+    entraAdminName: sqlEntraAdminName
+    entraTenantId: subscription().tenantId
+    skuName: sqlSkuName
+    skuTier: sqlSkuTier
+    skuFamily: sqlSkuFamily
+    skuCapacity: sqlSkuCapacity
+    privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
+    sqlDnsZoneId: network.outputs.sqlDnsZoneId
+  }
+}
+
+module serviceBus 'modules/service-bus.bicep' = {
+  name: 'service-bus'
+  scope: rg
+  params: {
+    location: location
+    tags: tags
+    namespaceName: names.serviceBus
+    topicName: names.serviceBusTopic
+    subscriptionName: names.serviceBusSubscription
+    queueName: names.serviceBusQueue
+    privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
+    serviceBusDnsZoneId: network.outputs.serviceBusDnsZoneId
+  }
+}
+
+module eventHubs 'modules/event-hubs.bicep' = {
+  name: 'event-hubs'
+  scope: rg
+  params: {
+    location: location
+    tags: tags
+    namespaceName: names.eventHubs
+    eventHubName: names.eventHub
+    privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
+    serviceBusDnsZoneId: network.outputs.serviceBusDnsZoneId
+  }
+}
+
+// ---------------------------------------------------------------------------
 // SEAMS for later tickets. Add modules here; do not restructure the above.
 //
-// SEAM ticket 06 (data services): add `module data 'modules/data.bicep'` (or
-//   one module per service) with `scope: rg`. Inputs available from this file:
-//   location, tags, namePrefix, uniqueSuffix, network.outputs.privateEndpointSubnetId,
-//   network.outputs.serviceBusDnsZoneId (shared by Service Bus and Event Hubs),
-//   network.outputs.sqlDnsZoneId. Add SQL tier, SQL admin and similar as new
-//   parameters in this file and in main.bicepparam.
-//
-// SEAM ticket 07 (identities, roles): add `module identities 'modules/identities.bicep'`
+// SEAM ticket 07 (identities, roles): the data service names and ids are
+//   available as sql.outputs, serviceBus.outputs and eventHubs.outputs for
+//   role assignments and the SQL user setup (Entra admin = sqlEntraAdminName).
+//   Add `module identities 'modules/identities.bicep'`
 //   creating the processor and tooling user-assigned identities and the role
 //   assignments on the ticket 06 resources. Feed the tooling identity id to the
 //   toolingVm module above (userAssignedIdentityIds).
@@ -178,3 +259,14 @@ output sqlDnsZoneId string = network.outputs.sqlDnsZoneId
 output toolingVmName string = toolingVm.outputs.vmName
 output toolingVmPublicIp string = toolingVm.outputs.publicIpAddress
 output toolingVmAdminUser string = toolingVmAdminUser
+output sqlServerName string = sql.outputs.serverName
+output sqlServerFqdn string = sql.outputs.serverFqdn
+output sqlDatabaseName string = sql.outputs.databaseName
+output serviceBusNamespaceName string = serviceBus.outputs.namespaceName
+output serviceBusNamespaceFqdn string = serviceBus.outputs.namespaceFqdn
+output serviceBusTopicName string = serviceBus.outputs.topicName
+output serviceBusSubscriptionName string = serviceBus.outputs.subscriptionName
+output serviceBusQueueName string = serviceBus.outputs.queueName
+output eventHubsNamespaceName string = eventHubs.outputs.namespaceName
+output eventHubsNamespaceFqdn string = eventHubs.outputs.namespaceFqdn
+output eventHubName string = eventHubs.outputs.eventHubName
