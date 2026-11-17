@@ -1,0 +1,12 @@
+// Messages handled, by outcome and reason, per minute. Pre-aggregated by the host (counter txproc.messages),
+// so it is exact: nothing here is sampled. Summed over all instances.
+// Replace __START__ and __END__ with UTC timestamps, for example 2026-11-17T09:55:00Z. Start a few minutes before the
+// generator starts and end a few minutes after the subscription has drained.
+let start = datetime(__START__);
+let end = datetime(__END__);
+customMetrics
+| where timestamp between (start .. end)
+| where name == "txproc.messages"
+| extend outcome = tostring(customDimensions.outcome), reason = tostring(customDimensions.reason)
+| summarize count = tolong(round(sum(todouble(coalesce(valueSum, value))))) by timestamp = bin(timestamp, 1m), outcome, reason
+| order by timestamp asc, outcome asc, reason asc

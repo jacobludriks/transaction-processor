@@ -59,6 +59,9 @@ public sealed record ProgressReport(TimeSpan Elapsed, long Released, long Sent, 
 public sealed record RunSummary(double TargetRate, TimeSpan Elapsed, long Sent, long Failed, string? FirstError)
 {
     public double AchievedRate => Elapsed > TimeSpan.Zero ? Sent / Elapsed.TotalSeconds : 0;
+
+    /// <summary>Whether the generator achieved at least 98% of the target rate with no send failures.</summary>
+    public bool HeldTargetRate => Failed == 0 && AchievedRate / TargetRate >= 0.98;
 }
 
 /// <summary>

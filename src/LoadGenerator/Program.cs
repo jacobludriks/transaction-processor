@@ -56,6 +56,7 @@ static async Task<int> RunLoadAsync(CliOptions cli, ServiceBusClient? client, Ca
         ? _ => new NoOpSink()
         : _ => new ServiceBusSink(client!.CreateSender(cli.Topic));
 
+    var startedAtUtc = DateTimeOffset.UtcNow;
     var summary = await new Publisher(new SystemClock()).RunAsync(
         publishOptions, createSink,
         p => Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
@@ -69,7 +70,12 @@ static async Task<int> RunLoadAsync(CliOptions cli, ServiceBusClient? client, Ca
     Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
         $"Target rate {summary.TargetRate:0.##} msg/s, achieved {summary.AchievedRate:0.0} msg/s ({ratio:P1} of target)"));
     if (summary.FirstError is not null) Console.WriteLine($"First error: {summary.FirstError}");
-    if (ratio < 0.98 || summary.Failed > 0)
+    if (cli.SummaryFile is not null)
+    {
+        await File.WriteAllTextAsync(cli.SummaryFile, RunSummaryFile.ToJson(cli, summary, startedAtUtc), CancellationToken.None);
+        Console.WriteLine($"Run summary written to {cli.SummaryFile}");
+    }
+    if (!summary.HeldTargetRate)
     {
         Console.WriteLine("WARNING: the generator did not hold the target rate (or had send failures). Do not use this run to judge the processor.");
         return 1;

@@ -1,0 +1,5 @@
+// Smoke check before a run: are the host's metrics reaching Application Insights, from how many instances?
+customMetrics
+| where timestamp > ago(15m)
+| where name startswith "txproc."
+| summarize points = count(), instances = dcount(cloud_RoleInstance), last_seen = max(timestamp) by name

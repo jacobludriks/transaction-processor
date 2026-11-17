@@ -1,0 +1,10 @@
+{
+  "name": "baseline",
+  "instanceCount": 3,
+  "maxConcurrentCalls": 16,
+  "prefetchCount": 32,
+  "databaseTier": "GP_Gen5_4",
+  "targetPublishRate": 300,
+  "expectedDeadLetterReasons": [],
+  "notes": "optional free text"
+}

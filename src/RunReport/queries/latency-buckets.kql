@@ -1,0 +1,11 @@
+// Latency (Service Bus enqueue time to output send completed) as a count per bucket upper bound `le`, in seconds,
+// per minute, over both destinations. Per bucket, not cumulative. "+Inf" is the overflow bucket.
+// The Azure Monitor exporter keeps only count/sum/min/max of a histogram, so the percentiles come from this counter.
+let start = datetime(__START__);
+let end = datetime(__END__);
+customMetrics
+| where timestamp between (start .. end)
+| where name == "txproc.message.latency.bucket"
+| extend le = tostring(customDimensions.le)
+| summarize count = tolong(round(sum(todouble(coalesce(valueSum, value))))) by timestamp = bin(timestamp, 1m), le
+| order by timestamp asc

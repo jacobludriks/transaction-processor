@@ -207,6 +207,10 @@ Needs: infrastructure deployed, SQL users created and `verify-access.sh` passing
 
 5. **Instances and zones.** `az appservice plan show -g rg-txproc-poc -n txproc-plan --query "{sku:sku, zoneRedundant:zoneRedundant}"` shows capacity 3 and `zoneRedundant: true`. In the portal (the web app, Scale out and Health check) all 3 instances are running and healthy. Record the results in the table below.
 
+### Telemetry for benchmarks (ticket 11)
+
+Besides Application Insights traces, the host exports pre-aggregated metrics (counters by outcome and a latency histogram, meter `TransactionProcessor`) to the same Application Insights component, once a minute and unsampled. They need no extra setting and no extra Azure resource. `src/RunReport/README.md` describes the instruments, the KQL and `az monitor metrics` queries that read them (Application Insights query API and Azure Monitor metrics API, so no public access to the data services), and the report tool that turns a run into a verdict.
+
 ## Commands
 
 Run these only when a real deployment has been approved. Always what-if first.

@@ -1,0 +1,11 @@
+// Cross-check, not an input to the report: the latency histogram's own count, mean and maximum per minute.
+// The count should equal the sum of the bucket counts for the same minute (sent to queue + sent to event hub).
+let start = datetime(__START__);
+let end = datetime(__END__);
+customMetrics
+| where timestamp between (start .. end)
+| where name == "txproc.message.latency"
+| extend destination = tostring(customDimensions.destination)
+| summarize messages = sum(valueCount), mean_seconds = sum(valueSum) / sum(valueCount), max_seconds = max(valueMax)
+    by timestamp = bin(timestamp, 1m), destination
+| order by timestamp asc, destination asc
