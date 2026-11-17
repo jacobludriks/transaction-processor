@@ -30,7 +30,10 @@ public sealed class TransactionHandler(string sqlConnectionString, IQueueSender 
         if (externalItemId is null)
             return new HandlerOutcome.DeadLetter(DeadLetterReasons.ItemNotFound);
         if (!await SkuExistsAsync(message.SkuId!, cancellationToken))
-            throw new NotImplementedException("Unrecognised SKU is not handled yet.");
+        {
+            await eventHub.SendAsync(ToJson(message, externalItemId), cancellationToken);
+            return new HandlerOutcome.SendToEventHub();
+        }
 
         await queue.SendAsync(ToJson(message, externalItemId), cancellationToken);
         return new HandlerOutcome.SendToQueue();
