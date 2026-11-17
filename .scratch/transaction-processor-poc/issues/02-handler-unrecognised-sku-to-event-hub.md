@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-- [ ] A test with an existing item and an unknown SKU gets a "send to event hub" outcome
-- [ ] The event hub JSON has exactly the same shape as the queue JSON from ticket 01
-- [ ] The queue path from ticket 01 still passes
-- [ ] There is a single event hub destination (no topics, no per-case routing)
+- [x] A test with an existing item and an unknown SKU gets a "send to event hub" outcome
+- [x] The event hub JSON has exactly the same shape as the queue JSON from ticket 01
+- [x] The queue path from ticket 01 still passes
+- [x] There is a single event hub destination (no topics, no per-case routing)
