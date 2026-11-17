@@ -20,7 +20,9 @@ Subscription-scope Bicep for the transaction processor POC. One command deploys,
 | `modules/role-assignments.bicep` | Built-in data-plane roles for both identities, scoped to the topic, subscription, queue and event hub (table in "Identities, roles and SQL users"). |
 | `scripts/vm/setup-sql-users.sh`, `setup-sql-users.sql` | Run on the VM as the Entra admin: creates a contained SQL user per identity and grants roles. Idempotent. |
 | `scripts/vm/verify-access.sh` | Run on the VM: proves each identity can do what it should and is refused the rest. |
-| `scripts/deploy.ps1` | One-command deploy (or `-WhatIf`). |
+| `modules/monitoring.bicep`, `modules/app-service.bicep` | Application Insights, and the processor host: App Service plan (Linux, P1v3, zone-redundant, 3 pinned instances) and web app (see "Processor host"). |
+| `scripts/deploy.ps1` | One-command deploy (or `-WhatIf`). Also takes `-ProcessorInstanceCount`, `-MaxConcurrentCalls`, `-PrefetchCount`, `-RuntimeStack`. |
+| `scripts/deploy-app.ps1` | Publishes the host and deploys the package to the web app (run after `deploy.ps1`). |
 | `scripts/teardown.ps1` | One-command delete of the resource group. |
 
 ### Data services (ticket 06)
@@ -34,7 +36,7 @@ Subscription-scope Bicep for the transaction processor POC. One command deploys,
 
 ### Extending (tickets 07, 08)
 
-Add modules to `main.bicep` at the `SEAM` comments and new parameters to `main.bicepparam`. Do not restructure the foundation. Outputs you can use: `network.outputs.privateEndpointSubnetId`, `appServiceSubnetId`, `serviceBusDnsZoneId`, `sqlDnsZoneId`, and `uniqueSuffix` for globally unique names. Ticket 07 is in place: use `identities.outputs.processorIdentityId` and `processorIdentityClientId` to attach the processor identity to the App Service and point the app at it.
+Tickets 06 to 08 are in place. Add further modules to `main.bicep` at the `SEAM` comments and new parameters to `main.bicepparam`. Do not restructure the foundation. Outputs you can use: `network.outputs.privateEndpointSubnetId`, `appServiceSubnetId`, `serviceBusDnsZoneId`, `sqlDnsZoneId`, and `uniqueSuffix` for globally unique names. The processor identity outputs (`identities.outputs.processorIdentityId`, `processorIdentityClientId`) are consumed by the processor host.
 
 ## Identities, roles and SQL users (ticket 07)
 
@@ -113,6 +115,98 @@ Event Hubs receive is an AMQP operation, so "tooling can receive from the event 
 
 The setup and verify scripts, and the REST and `sqlcmd` behaviours they rely on (for example `AZURE_TOKEN_CREDENTIALS=AzureCLICredential` being honoured by the installed `sqlcmd`, and bearer-token REST calls through the private endpoints), have been syntax-checked only. They have not run against Azure.
 
+## Processor host (ticket 08)
+
+The processor is a .NET background service plus a tiny HTTP endpoint (`src/TransactionProcessor.Host`). It contains no routing or lookup logic: it reads the subscription with `ServiceBusProcessor` (peek-lock, auto-complete off), gives each body to the handler, and settles the message from the handler's outcome:
+
+| Handler outcome | Receive loop action |
+|---|---|
+| send to queue / send to event hub (output already sent) | complete the message |
+| dead-letter with reason | dead-letter it; the reason becomes the Service Bus dead-letter reason |
+| retry (database error or failed send) | abandon it; Service Bus redelivers it (and dead-letters it after 10 deliveries) |
+| unexpected exception | abandon it and log |
+
+### What Bicep creates
+
+- `modules/monitoring.bicep`: Log Analytics workspace and a workspace-based Application Insights component.
+- `modules/app-service.bicep`: App Service plan (Linux, Premium v3 `P1v3`, `zoneRedundant: true`, 3 instances; there is no autoscale resource, so the count is pinned) and the web app: HTTPS only, **Always On**, health check path `/health`, VNet integration into the App Service subnet, the processor user-assigned identity attached, runtime `DOTNETCORE|10.0` (parameter `processorRuntimeStack`, fallback `DOTNETCORE|8.0`), FTP disabled.
+- Names: plan `txproc-plan`, app `txproc-app-<suffix>`. Deployment outputs: `processorAppName`, `processorAppHostName`, `appServicePlanName`, `appInsightsName`.
+
+### Configuration (app settings, no code change)
+
+All settings are plain app settings on the web app, set from Bicep. On App Service Linux `:` is not allowed in setting names, so they use `__`.
+
+| Setting | Source |
+|---|---|
+| `Processor__ManagedIdentityClientId` | `processorIdentityClientId`. Used for `DefaultAzureCredential` (`ManagedIdentityClientId`) and as the SQL `User Id` with `Authentication=Active Directory Managed Identity`. No connection string, key or password exists. |
+| `Processor__ServiceBusNamespace`, `__TopicName`, `__SubscriptionName`, `__QueueName` | Service Bus module outputs |
+| `Processor__EventHubsNamespace`, `__EventHubName` | Event Hubs module outputs |
+| `Processor__SqlServer`, `__SqlDatabase` | SQL module outputs |
+| `Processor__MaxConcurrentCalls` | `processorMaxConcurrentCalls` (default 16; `deploy.ps1 -MaxConcurrentCalls`, env `POC_MAX_CONCURRENT_CALLS`) |
+| `Processor__PrefetchCount` | `processorPrefetchCount` (default 32; `deploy.ps1 -PrefetchCount`, env `POC_PREFETCH_COUNT`) |
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | the Application Insights component. Telemetry is off when it is not set (local runs). |
+
+The instance count is `processorInstanceCount` (default 3; `deploy.ps1 -ProcessorInstanceCount`, env `POC_PROCESSOR_INSTANCE_COUNT`). To change concurrency or instance count between benchmark runs, redeploy with the new value; nothing else is rebuilt and the app restarts with the new setting. The host refuses to start (and `/health` never goes green) if a required setting is missing.
+
+`/health` returns 200 while the receive loop is running and 503 otherwise. It does not probe Service Bus or SQL, so a dependency outage does not make App Service recycle otherwise healthy instances.
+
+### Deploy the app (not run yet)
+
+`deploy.ps1` creates the plan and app, and `teardown.ps1` deletes them with the resource group. The package is deployed separately, after the infrastructure exists:
+
+```powershell
+./infra/scripts/deploy-app.ps1                   # dotnet publish (Release), zip, az webapp deploy; app name read from the deployment outputs
+./infra/scripts/deploy-app.ps1 -Runtime net8.0   # only if .NET 10 is unavailable (after deploy.ps1 -RuntimeStack 'DOTNETCORE|8.0')
+```
+
+The zip goes to the app's SCM endpoint over the public network, so run it from the laptop. The .NET 8 fallback publishes the same code with `-p:ProcessorTargetFramework=net8.0` (an offline publish with that property builds).
+
+Outbound routing: the app routes all traffic through the VNet (`processorRouteAllTraffic`, default `true`). Private endpoints resolve and connect either way, but Application Insights ingestion then leaves through the VNet subnet and needs outbound internet from it. If no telemetry arrives while messages flow, set `processorRouteAllTraffic` to `false` in `main.bicepparam` and redeploy.
+
+### Smoke test (from the tooling VM, after deploy.ps1, setup-sql-users.sh and deploy-app.ps1)
+
+Needs: infrastructure deployed, SQL users created and `verify-access.sh` passing, the app deployed and `https://<app>.azurewebsites.net/health` returning 200. The tooling identity can send to the topic and read the queue and the dead-letter queues. Replace `<sb>`, `<sql>` and `<tooling-client-id>` with the deployment outputs.
+
+1. **Reference data.** If the seeder (ticket 09) has not run, create one item and one SKU as the tooling identity:
+
+   ```bash
+   sqlcmd -S <sql>.database.windows.net -d txproc --authentication-method ActiveDirectoryManagedIdentity -U <tooling-client-id> -b -Q "
+   IF OBJECT_ID('dbo.Item') IS NULL CREATE TABLE dbo.Item (ItemId BIGINT NOT NULL PRIMARY KEY, ExternalItemId NVARCHAR(64) NOT NULL, Name NVARCHAR(200) NULL, Category NVARCHAR(100) NULL, CreatedUtc DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME());
+   IF OBJECT_ID('dbo.Sku')  IS NULL CREATE TABLE dbo.Sku  (SkuId NVARCHAR(64) NOT NULL PRIMARY KEY, Description NVARCHAR(200) NULL, Brand NVARCHAR(100) NULL, CreatedUtc DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME());
+   IF NOT EXISTS (SELECT 1 FROM dbo.Item WHERE ItemId = 1) INSERT dbo.Item (ItemId, ExternalItemId) VALUES (1, 'EXT-1');
+   IF NOT EXISTS (SELECT 1 FROM dbo.Sku WHERE SkuId = 'SKU-0000001') INSERT dbo.Sku (SkuId) VALUES ('SKU-0000001');"
+   ```
+
+   Item 1 and `SKU-0000001` follow the seeded key scheme (external id `EXT-1`). Item 99999999 and `SKU-9999999` are never seeded.
+
+2. **Send four messages** to the topic as the tooling identity (REST, no secrets):
+
+   ```bash
+   TOKEN=$(curl -sS -H Metadata:true "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&client_id=<tooling-client-id>&resource=https://servicebus.azure.net" | jq -r .access_token)
+   send() { curl -sS -o /dev/null -w '%{http_code}\n' -X POST "https://<sb>.servicebus.windows.net/transactions-in/messages" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/atom+xml;type=entry;charset=utf-8' --data "$1"; }
+   send '<transaction><transactionId>smoke-known</transactionId><itemId>1</itemId><skuId>SKU-0000001</skuId></transaction>'
+   send '<transaction><transactionId>smoke-unknown-sku</transactionId><itemId>1</itemId><skuId>SKU-9999999</skuId></transaction>'
+   send '<transaction><transactionId>smoke-malformed</itemId></transaction'
+   send '<transaction><transactionId>smoke-unknown-item</transactionId><itemId>99999999</itemId><skuId>SKU-0000001</skuId></transaction>'
+   ```
+
+   Each call prints `201`.
+
+3. **Check where each ended up** (allow a few seconds):
+
+   | Message | Expected result | How to check |
+   |---|---|---|
+   | known SKU | one JSON message in the output queue `transactions-recognised`, with `ExternalItemId` `EXT-1` | `POST https://<sb>.servicebus.windows.net/transactions-recognised/messages/head?timeout=5` with the same token (peek-lock read: 201 and the body; use `DELETE` instead of `POST` to remove it) |
+   | unknown SKU | one event in the event hub `transactions-unrecognised`, nothing extra in the queue | Event Hubs receive is AMQP only: the namespace metric "Incoming Messages" in the portal goes up by 1, or use the throwaway event hub reader |
+   | malformed XML | in the subscription dead-letter queue with reason `InvalidXml` | `POST .../transactions-in/subscriptions/processor/$deadletterqueue/messages/head?timeout=5`; the `DeadLetterReason` response header carries the reason (use `curl -i` to see headers) |
+   | unknown item | in the subscription dead-letter queue with reason `ItemNotFound` | same dead-letter read |
+
+   The subscription itself must be empty afterwards (a message is completed only after its output was sent). Application Insights shows the receive and send operations for each message.
+
+4. **A failed send leaves the message for redelivery** (optional): remove the processor's Azure Service Bus Data Sender role on the output queue, send the known-SKU message, and check that it is not completed: its delivery count rises on the subscription, and it dead-letters with `MaxDeliveryCountExceeded` after 10 deliveries. Restore the role by redeploying.
+
+5. **Instances and zones.** `az appservice plan show -g rg-txproc-poc -n txproc-plan --query "{sku:sku, zoneRedundant:zoneRedundant}"` shows capacity 3 and `zoneRedundant: true`. In the portal (the web app, Scale out and Health check) all 3 instances are running and healthy. Record the results in the table below.
+
 ## Commands
 
 Run these only when a real deployment has been approved. Always what-if first.
@@ -145,7 +239,7 @@ Nothing below has been run. The offline work was limited to `az bicep build`, `a
    - SQL Database General Purpose provisioned 4 vCores: `zoneRedundant` is true on the database, and confirm the chosen hardware generation supports it in this region.
    - Exact checks for the three data services are in "Data service checks" below.
    - The tooling VM and its public IP are not zone-pinned (a Standard public IP is zone-redundant by default in zoned regions). The VM is throwaway tooling, so a zone failure is accepted.
-3. **What-if is clean.** Run `deploy.ps1 -WhatIf` and check it shows only creates (resource group, VNet, NSG, two DNS zones with links, public IP, NIC, VM, budget, SQL server and database, Service Bus namespace with topic, subscription and queue, Event Hubs namespace and event hub, three private endpoints with DNS zone groups) and no errors or surprises. Do this before the first real deployment.
+3. **What-if is clean.** Run `deploy.ps1 -WhatIf` and check it shows only creates (resource group, VNet, NSG, two DNS zones with links, public IP, NIC, VM, budget, SQL server and database, Service Bus namespace with topic, subscription and queue, Event Hubs namespace and event hub, three private endpoints with DNS zone groups, Log Analytics workspace, Application Insights, App Service plan and web app) and no errors or surprises. Do this before the first real deployment.
 4. **VM quota.** Confirm the subscription has at least 4 vCPU of the `Standard Dsv5 Family` in Australia East, and change `toolingVmSize` in `main.bicepparam` if not.
 5. **Budget currency.** Budget amounts are in the subscription billing currency. Confirm it is AUD, otherwise adjust `budgetAmount` and `budgetAlertAmounts`. Budget alerts are emails and lag actual spend by up to a day, so they do not replace tearing the environment down.
 6. **After deploy.** Check SSH works from the operator IP and is refused from elsewhere, `/var/lib/tooling-ready` exists on the VM, `dotnet --list-sdks` shows 10.x, and `sqlcmd --version` and `az version` work. Then run `teardown.ps1` and confirm `az group exists --name rg-txproc-poc` returns `false`.
@@ -253,4 +347,14 @@ Expected: one subscription, `maxDeliveryCount` 10, one `$Default` rule that is a
 | Tooling identity: receive from the event hub | not yet checked | | needs the event hub reader (AMQP) |
 | Processor identity: SQL read allowed, SQL write refused | not yet checked | | `verify-access.sh` |
 | Processor identity: receive on subscription, send to queue and event hub; send to topic refused | not yet checked | | `verify-access.sh` |
+| Processor host: app deployed by `deploy.ps1` and removed by `teardown.ps1`; 3 instances running, plan zone-redundant | not yet checked | | |
+| Processor host authenticates to Service Bus, Event Hubs and SQL as the processor identity only (no secrets in app settings) | not yet checked | | |
+| Smoke test: known SKU ends up in the output queue | not yet checked | | |
+| Smoke test: unknown SKU ends up in the event hub | not yet checked | | |
+| Smoke test: malformed message ends up in the dead-letter queue with `InvalidXml` | not yet checked | | |
+| Smoke test: unknown item ends up in the dead-letter queue with `ItemNotFound` | not yet checked | | |
+| Failed send leaves the message for redelivery (not completed) | not yet checked | | |
+| Concurrency and instance count change by redeploy only, no code change | not yet checked | | |
+| `/health` responds 200, Always On enabled | not yet checked | | |
+| Application Insights receives telemetry (else set `processorRouteAllTraffic` to false) | not yet checked | | |
 | No connection string or password in any template, script or setting | not yet checked | | grep the repo and the deployed app settings |
