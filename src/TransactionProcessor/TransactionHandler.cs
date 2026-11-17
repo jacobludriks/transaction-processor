@@ -24,7 +24,10 @@ public sealed class TransactionHandler(string sqlConnectionString, IQueueSender 
         var externalItemId = await FindExternalItemIdAsync(message.ItemId!.Value, cancellationToken)
             ?? throw new NotImplementedException("Item not found is not handled yet.");
         if (!await SkuExistsAsync(message.SkuId!, cancellationToken))
-            throw new NotImplementedException("Unrecognised SKU is not handled yet.");
+        {
+            await eventHub.SendAsync(ToJson(message, externalItemId), cancellationToken);
+            return new HandlerOutcome.SendToEventHub();
+        }
 
         await queue.SendAsync(ToJson(message, externalItemId), cancellationToken);
         return new HandlerOutcome.SendToQueue();
