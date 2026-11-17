@@ -18,11 +18,17 @@ public sealed class TransactionHandler(string sqlConnectionString, IQueueSender 
 
     public async Task<HandlerOutcome> HandleAsync(string xmlBody, CancellationToken cancellationToken = default)
     {
-        var message = Decode(xmlBody);
+        if (!TryDecode(xmlBody, out var message))
+            return new HandlerOutcome.DeadLetter(DeadLetterReasons.InvalidXml);
+        if (message.ItemId is null)
+            return new HandlerOutcome.DeadLetter(DeadLetterReasons.MissingItemId);
+        if (string.IsNullOrWhiteSpace(message.SkuId))
+            return new HandlerOutcome.DeadLetter(DeadLetterReasons.MissingSkuId);
 
         // Only the recognised-SKU path exists so far; the other outcomes are added by later tickets.
-        var externalItemId = await FindExternalItemIdAsync(message.ItemId!.Value, cancellationToken)
-            ?? throw new NotImplementedException("Item not found is not handled yet.");
+        var externalItemId = await FindExternalItemIdAsync(message.ItemId!.Value, cancellationToken);
+        if (externalItemId is null)
+            return new HandlerOutcome.DeadLetter(DeadLetterReasons.ItemNotFound);
         if (!await SkuExistsAsync(message.SkuId!, cancellationToken))
             throw new NotImplementedException("Unrecognised SKU is not handled yet.");
 
@@ -30,10 +36,21 @@ public sealed class TransactionHandler(string sqlConnectionString, IQueueSender 
         return new HandlerOutcome.SendToQueue();
     }
 
-    private static TransactionMessage Decode(string xmlBody)
+    /// <summary>Decodes the body. Returns false when it is not XML that decodes into a transaction message.</summary>
+    private static bool TryDecode(string xmlBody, out TransactionMessage message)
     {
-        using var reader = XmlReader.Create(new StringReader(xmlBody), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit });
-        return (TransactionMessage)Serializer.Deserialize(reader)!;
+        try
+        {
+            using var reader = XmlReader.Create(new StringReader(xmlBody), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit });
+            message = (TransactionMessage)Serializer.Deserialize(reader)!;
+            return true;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or XmlException)
+        {
+            // XmlSerializer wraps XML and conversion errors in InvalidOperationException.
+            message = null!;
+            return false;
+        }
     }
 
     private static string ToJson(TransactionMessage message, string externalItemId)
