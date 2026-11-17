@@ -64,6 +64,18 @@ public class RunAnalyzerTests
     }
 
     [Fact]
+    public void The_throughput_verdict_states_the_tolerance_whether_it_passes_or_fails()
+    {
+        var passing = Criterion(Analyze(new SyntheticRun { PublishTps = 300, ProcessTps = 300 }), "Sustained throughput");
+        var failing = Criterion(Analyze(new SyntheticRun { PublishTps = 300, ProcessTps = 250 }), "Sustained throughput");
+
+        Assert.Contains("2% tolerance", passing.Detail);
+        Assert.Contains("294", passing.Detail);
+        Assert.Contains("2% tolerance", failing.Detail);
+        Assert.Contains("294", failing.Detail);
+    }
+
+    [Fact]
     public void A_run_with_less_than_ten_whole_minutes_cannot_show_ten_minutes_of_sustained_throughput()
     {
         // 12 minutes from 10:00:20 leaves 11 whole minutes, 9 once the edges are trimmed.
@@ -132,10 +144,12 @@ public class RunAnalyzerTests
     }
 
     [Fact]
-    public void P95_passes_when_its_bucket_ends_at_or_below_2_seconds_and_fails_above()
+    public void P95_passes_when_its_bucket_ends_below_2_seconds_and_fails_when_it_ends_at_2_seconds_or_above()
     {
         Assert.True(Criterion(Analyze(new SyntheticRun()), "p95 latency under 2 s").Passed);
-        // 1% of messages over 2 s still leaves p95 at or under 2 s; 6% does not.
+        // 1% of messages over 2 s still leaves p95 in the bucket that ends at 1 s. A p95 in the bucket ending at exactly 2 s
+        // could be 2 s, and the spec says "under 2 seconds", so it fails; so does a p95 above 2 s.
+        Assert.False(Criterion(Analyze(new SyntheticRun { LatencyShares = [0.10, 0.40, 0.30, 0.10, 0.09, 0.01, 0.0] }), "p95 latency under 2 s").Passed);
         Assert.False(Criterion(Analyze(new SyntheticRun { LatencyShares = [0.10, 0.40, 0.30, 0.10, 0.04, 0.06, 0.0] }), "p95 latency under 2 s").Passed);
         Assert.False(Criterion(Analyze(new SyntheticRun { LatencyShares = [0.10, 0.40, 0.30, 0.10, 0.03, 0.02, 0.05] }), "p95 latency under 2 s").Passed);
     }

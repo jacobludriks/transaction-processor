@@ -170,15 +170,17 @@ public static class RunAnalyzer
     private static CriterionResult ThroughputResult(ThroughputFigures t, MeasurementWindow w, GoNoGoCriteria c)
     {
         var requiredTps = c.RequiredTps * (1 - c.TpsTolerance);
+        // Stated next to every throughput verdict so the tolerance is never hidden: the bar is 294, not 300.
+        var tolerance = Inv($"The bar is {requiredTps:0.#} TPS: {c.RequiredTps:0} TPS less a {c.TpsTolerance * 100:0.#}% tolerance.");
         var problems = new List<string>();
         if (w.DurationSeconds < c.RequiredWindow.TotalSeconds)
             problems.Add(Inv($"the measurement window is {w.DurationSeconds:0} s of whole minutes inside the run, less than the {c.RequiredWindow.TotalMinutes:0} minutes needed (run the generator for at least {c.RequiredWindow.TotalMinutes + 2:0} minutes)"));
         if (t.SustainedTps < requiredTps)
-            problems.Add(Inv($"sustained {t.SustainedTps:0.#} TPS is below the {requiredTps:0.#} needed ({c.RequiredTps:0} TPS less a {c.TpsTolerance:P0} tolerance)"));
+            problems.Add(Inv($"sustained {t.SustainedTps:0.#} TPS is below {requiredTps:0.#}"));
 
         return problems.Count == 0
-            ? Result(ThroughputCriterion, true, $"Sustained {t.SustainedTps:0.#} TPS over {w.DurationSeconds:0} s (lowest minute {t.MinBinTps:0.#} TPS); {requiredTps:0.#} needed.")
-            : Result(ThroughputCriterion, false, $"Not shown: {string.Join("; ", problems)}.");
+            ? Result(ThroughputCriterion, true, $"Sustained {t.SustainedTps:0.#} TPS over {w.DurationSeconds:0} s (lowest minute {t.MinBinTps:0.#} TPS). {tolerance}")
+            : Result(ThroughputCriterion, false, $"Not shown: {string.Join("; ", problems)}. {tolerance}");
     }
 
     private static CriterionResult BacklogResult(BacklogFigures b)
@@ -192,7 +194,7 @@ public static class RunAnalyzer
     private static CriterionResult LatencyResult(LatencyFigures l, GoNoGoCriteria c)
     {
         if (l.SampleCount == 0) return Result(LatencyCriterion, false, $"No latency samples, so p95 cannot be judged.");
-        var passed = l.P95UpperBoundSeconds is { } upper && upper <= c.MaxP95Seconds;
+        var passed = l.P95UpperBoundSeconds is { } upper && upper < c.MaxP95Seconds;
         var bound = l.P95UpperBoundSeconds is { } u ? Inv($"at most {u:0.###} s") : "above the largest bucket";
         return Result(LatencyCriterion, passed,
             $"p95 is about {l.P95Seconds:0.###} s ({bound}); the limit is {c.MaxP95Seconds:0.#} s. The verdict uses the bucket's upper bound.");

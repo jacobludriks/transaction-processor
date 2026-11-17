@@ -84,6 +84,7 @@ public sealed class RunStoreTests : IDisposable
         Assert.Contains("| Max concurrent calls | 64 |", markdown);
         Assert.Contains("| Target publish rate | 300 msg/s |", markdown);
         Assert.Contains("| Sustained throughput | 300.0 TPS |", markdown);
+        Assert.Contains("2% tolerance", markdown);
         Assert.Contains("| Latency p50 | 0.250 s |", markdown);
         Assert.Contains("| Latency p95 | 1.000 s |", markdown);
         Assert.Contains("| Latency p99 | 2.000 s |", markdown);
