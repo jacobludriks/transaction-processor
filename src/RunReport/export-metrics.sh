@@ -59,4 +59,4 @@ dlq="$(metric DeadletteredMessages Maximum | jq '[.value[0].timeseries[0].data[]
 jq -n --argjson outcomes "$outcomes" --argjson buckets "$buckets" --argjson backlog "$backlog" --argjson dlq "$dlq" \
   '{binSeconds: 60, outcomes: $outcomes, latencyBuckets: $buckets, backlog: $backlog, deadLetterQueue: $dlq}' > "$OUT"
 
-echo "Wrote $OUT: $(jq '[.outcomes | length, (.latencyBuckets | length), (.backlog | length), (.deadLetterQueue | length)] | @csv' -r "$OUT") (outcome, bucket, backlog and dead-letter rows)." >&2
+echo "Wrote $OUT: $(jq '[(.outcomes | length), (.latencyBuckets | length), (.backlog | length), (.deadLetterQueue | length)] | @csv' -r "$OUT") (outcome, bucket, backlog and dead-letter rows)." >&2

@@ -124,7 +124,7 @@ param processorPrefetchCount int = 32
 ])
 param processorRuntimeStack string = 'DOTNETCORE|10.0'
 
-@description('Route all outbound traffic of the web app through the VNet. See modules/app-service.bicep.')
+@description('Route all outbound traffic of the web app through the VNet. False in the POC: with true and no NAT gateway, Application Insights ingestion failed on the first live deployment. See modules/app-service.bicep.')
 param processorRouteAllTraffic bool = true
 
 @description('Tags applied to the resource group and resources.')

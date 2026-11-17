@@ -65,4 +65,7 @@ param processorInstanceCount = int(readEnvironmentVariable('POC_PROCESSOR_INSTAN
 param processorMaxConcurrentCalls = int(readEnvironmentVariable('POC_MAX_CONCURRENT_CALLS', '16'))
 param processorPrefetchCount = int(readEnvironmentVariable('POC_PREFETCH_COUNT', '32'))
 param processorRuntimeStack = readEnvironmentVariable('POC_RUNTIME_STACK', 'DOTNETCORE|10.0')
-param processorRouteAllTraffic = true
+// false: only private (RFC1918) traffic goes through the VNet, so the private endpoints still work
+// and Application Insights ingestion leaves through App Service's own outbound path. With true and
+// no NAT gateway, no telemetry reached Application Insights on the first live deployment.
+param processorRouteAllTraffic = false
