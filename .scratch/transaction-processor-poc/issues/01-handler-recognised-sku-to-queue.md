@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] The solution builds on .NET 10 and the test suite runs locally with a SQL Server container, with no Azure resources needed
 - [x] The message contract covers about 40 fields, including `itemId` and `skuId`, and decodes from XML with the standard XML serializer (no XSD validation)
