@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using TransactionProcessor;
 
 namespace RunReport;
 
@@ -45,7 +46,7 @@ public static class RunAnalyzer
         var windowOutcomes = export.Outcomes.Where(o => InWindow(o.Timestamp)).ToList();
         var binsWithData = windowOutcomes.Select(o => o.Timestamp.UtcTicks).Distinct().Count();
         var outputsByBin = windowOutcomes
-            .Where(o => IsOutput(o.Outcome))
+            .Where(o => MessageOutcomes.IsOutput(o.Outcome))
             .GroupBy(o => o.Timestamp.UtcTicks)
             .ToDictionary(g => g.Key, g => g.Sum(o => o.Count));
         var perBinTps = Enumerable.Range(0, expectedBins)
@@ -84,10 +85,10 @@ public static class RunAnalyzer
             .GroupBy(o => string.IsNullOrWhiteSpace(o.Reason) ? "unknown" : o.Reason!)
             .OrderBy(g => g.Key, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.Sum(o => o.Count));
-        var deadLetteredByReason = ByReason("dead_lettered");
-        var abandonedByReason = ByReason("abandoned");
-        var sentToQueue = Total("sent_to_queue");
-        var sentToEventHub = Total("sent_to_event_hub");
+        var deadLetteredByReason = ByReason(MessageOutcomes.DeadLettered);
+        var abandonedByReason = ByReason(MessageOutcomes.Abandoned);
+        var sentToQueue = Total(MessageOutcomes.SentToQueue);
+        var sentToEventHub = Total(MessageOutcomes.SentToEventHub);
         var deadLettered = deadLetteredByReason.Values.Sum();
         var outcomes = new OutcomeFigures(
             sentToQueue, sentToEventHub, deadLettered, abandonedByReason.Values.Sum(), deadLetteredByReason, abandonedByReason);
@@ -146,8 +147,6 @@ public static class RunAnalyzer
             Verdict = new Verdict(MeetsAll(verdictCriteria), verdictCriteria, warnings),
         };
     }
-
-    private static bool IsOutput(string outcome) => outcome is "sent_to_queue" or "sent_to_event_hub";
 
     private static BacklogFigures BacklogTrend(List<BacklogSample> window, TimeSpan windowDuration, double growthThreshold, double? atEndOfData)
     {

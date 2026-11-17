@@ -1,3 +1,5 @@
+using TransactionProcessor;
+
 namespace RunReport.Tests;
 
 /// <summary>
@@ -19,7 +21,7 @@ public sealed class SyntheticRun
     /// <summary>Per-bucket share of messages. Bounds 0.1, 0.25, 0.5, 1, 2, 5, +Inf. Cumulative: 10%, 50%, 80%, 95%, 99%, 100%, 100%.</summary>
     public double[] LatencyShares { get; init; } = [0.10, 0.40, 0.30, 0.15, 0.04, 0.01, 0.0];
 
-    public static readonly string[] Bounds = ["0.1", "0.25", "0.5", "1", "2", "5", "+Inf"];
+    public static readonly string[] Bounds = ["0.1", "0.25", "0.5", "1", "2", "5", LatencyBucketLabels.Overflow];
 
     /// <summary>Backlog (active messages) at the given time. Default: a steady 120 while publishing, then drained to 0.</summary>
     public Func<DateTimeOffset, double>? Backlog { get; init; }
@@ -72,8 +74,8 @@ public sealed class SyntheticRun
             var processed = (long)Math.Round(ProcessTps * overlap);
             if (first && OutputsMissing != 0) { processed -= OutputsMissing; first = false; }
             var matched = processed - (long)Math.Round(processed * UnmatchedShare);
-            outcomes.Add(new OutcomeSample(bin, "sent_to_queue", null, matched));
-            outcomes.Add(new OutcomeSample(bin, "sent_to_event_hub", null, processed - matched));
+            outcomes.Add(new OutcomeSample(bin, MessageOutcomes.SentToQueue, null, matched));
+            outcomes.Add(new OutcomeSample(bin, MessageOutcomes.SentToEventHub, null, processed - matched));
             for (var i = 0; i < Bounds.Length; i++)
                 buckets.Add(new LatencyBucketSample(bin, Bounds[i], (long)Math.Round(processed * LatencyShares[i])));
         }

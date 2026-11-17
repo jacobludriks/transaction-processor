@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TransactionProcessor;
 
 namespace RunReport.Tests;
 
@@ -106,8 +107,8 @@ public sealed class RunStoreTests : IDisposable
     {
         var run = new SyntheticRun { OutputsMissing = 9, DeadLetterQueue = t => t >= new DateTimeOffset(2026, 11, 17, 10, 5, 0, TimeSpan.Zero) ? 9 : 0 };
         var minute = new DateTimeOffset(2026, 11, 17, 10, 5, 0, TimeSpan.Zero);
-        run.ExtraOutcomes.Add(new OutcomeSample(minute, "dead_lettered", "ItemNotFound", 7));
-        run.ExtraOutcomes.Add(new OutcomeSample(minute, "dead_lettered", "InvalidXml", 2));
+        run.ExtraOutcomes.Add(new OutcomeSample(minute, MessageOutcomes.DeadLettered, DeadLetterReasons.ItemNotFound, 7));
+        run.ExtraOutcomes.Add(new OutcomeSample(minute, MessageOutcomes.DeadLettered, DeadLetterReasons.InvalidXml, 2));
 
         var markdown = File.ReadAllText(RunStore.Save(Record(run), _dir).MarkdownPath);
 

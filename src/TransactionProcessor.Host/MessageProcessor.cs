@@ -26,7 +26,7 @@ public sealed class MessageProcessor(
         {
             // The handler turns every expected failure into an outcome. Anything else is a bug: give the
             // message back rather than lose it. Service Bus dead-letters it once the delivery count is exhausted.
-            _metrics.Abandoned("unhandled_exception");
+            _metrics.Abandoned(AbandonReasons.UnhandledException);
             await settlement.AbandonAsync(cancellationToken);
             throw;
         }
@@ -37,14 +37,10 @@ public sealed class MessageProcessor(
         switch (outcome)
         {
             // The handler has already sent the output, so the message is complete.
-            case HandlerOutcome.SendToQueue:
-                if (enqueuedTime is { } queued) _metrics.SentToQueue((outputSentAt - queued).TotalSeconds);
-                else _metrics.SentToQueue();
-                await settlement.CompleteAsync(cancellationToken);
-                break;
-            case HandlerOutcome.SendToEventHub:
-                if (enqueuedTime is { } queuedForHub) _metrics.SentToEventHub((outputSentAt - queuedForHub).TotalSeconds);
-                else _metrics.SentToEventHub();
+            case HandlerOutcome.SendToQueue or HandlerOutcome.SendToEventHub:
+                double? latencySeconds = enqueuedTime is { } queued ? (outputSentAt - queued).TotalSeconds : null;
+                if (outcome is HandlerOutcome.SendToQueue) _metrics.SentToQueue(latencySeconds);
+                else _metrics.SentToEventHub(latencySeconds);
                 await settlement.CompleteAsync(cancellationToken);
                 break;
             case HandlerOutcome.DeadLetter deadLetter:
@@ -52,7 +48,7 @@ public sealed class MessageProcessor(
                 await settlement.DeadLetterAsync(deadLetter.Reason, cancellationToken);
                 break;
             case HandlerOutcome.Retry:
-                _metrics.Abandoned("transient_failure");
+                _metrics.Abandoned(AbandonReasons.TransientFailure);
                 await settlement.AbandonAsync(cancellationToken);
                 break;
         }
