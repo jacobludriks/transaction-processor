@@ -27,6 +27,12 @@ param(
   [Parameter(Mandatory)] [string] $SqlAdminName,
   # SQL vCores. Change between runs to scale the database; the rest is not rebuilt.
   [ValidateRange(2, 80)] [int] $SqlSkuCapacity = 4,
+  # Processor host: pinned instance count and Service Bus concurrency per instance. Configuration only, no code change.
+  [ValidateRange(2, 30)] [int] $ProcessorInstanceCount = 3,
+  [ValidateRange(1, 10000)] [int] $MaxConcurrentCalls = 16,
+  [ValidateRange(0, 100000)] [int] $PrefetchCount = 32,
+  # Web app runtime. Use DOTNETCORE|8.0 only if .NET 10 is not offered on App Service Linux in the region.
+  [ValidateSet('DOTNETCORE|10.0', 'DOTNETCORE|8.0')] [string] $RuntimeStack = 'DOTNETCORE|10.0',
   # Run what-if instead of deploying.
   [switch] $WhatIf
 )
@@ -51,6 +57,10 @@ $env:POC_BUDGET_EMAIL = $BudgetEmail
 $env:POC_SQL_ADMIN_OBJECT_ID = $SqlAdminObjectId
 $env:POC_SQL_ADMIN_NAME = $SqlAdminName
 $env:POC_SQL_SKU_CAPACITY = "$SqlSkuCapacity"
+$env:POC_PROCESSOR_INSTANCE_COUNT = "$ProcessorInstanceCount"
+$env:POC_MAX_CONCURRENT_CALLS = "$MaxConcurrentCalls"
+$env:POC_PREFETCH_COUNT = "$PrefetchCount"
+$env:POC_RUNTIME_STACK = $RuntimeStack
 
 # Region comes from main.bicepparam so there is a single source.
 $location = [regex]::Match((Get-Content $params -Raw), "param location = '([^']+)'").Groups[1].Value

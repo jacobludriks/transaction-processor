@@ -49,3 +49,15 @@ param budgetAlertAmounts = [
 // VM so verify-access.sh can show from the VM that it is refused SQL writes.
 // Set to false and redeploy to leave only the tooling identity on the VM.
 param attachProcessorIdentityToVm = true
+
+// Processor host (ticket 08). Plan: Premium v3 P1v3, zone-redundant, 3 pinned
+// instances, no autoscale. Instance count and concurrency are configuration:
+// change them (deploy.ps1 -ProcessorInstanceCount 3 -MaxConcurrentCalls 32) and
+// redeploy; no code change. Runtime: .NET 10, with .NET 8 as the fallback
+// (POC_RUNTIME_STACK='DOTNETCORE|8.0', then deploy-app.ps1 -Runtime net8.0).
+param appServicePlanSku = 'P1v3'
+param processorInstanceCount = int(readEnvironmentVariable('POC_PROCESSOR_INSTANCE_COUNT', '3'))
+param processorMaxConcurrentCalls = int(readEnvironmentVariable('POC_MAX_CONCURRENT_CALLS', '16'))
+param processorPrefetchCount = int(readEnvironmentVariable('POC_PREFETCH_COUNT', '32'))
+param processorRuntimeStack = readEnvironmentVariable('POC_RUNTIME_STACK', 'DOTNETCORE|10.0')
+param processorRouteAllTraffic = true

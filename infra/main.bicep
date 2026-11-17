@@ -93,6 +93,33 @@ param sqlSkuCapacity int = 4
 @description('Also attach the processor identity to the tooling VM, so the verification script can prove from the VM that the processor identity is refused write access. The VM then holds both identities. Set to false after verification (redeploy) if you want the VM limited to the tooling identity.')
 param attachProcessorIdentityToVm bool = true
 
+// Processor host (ticket 08)
+
+@description('App Service plan SKU. Premium v3 mirrors production hosting.')
+param appServicePlanSku string = 'P1v3'
+
+@description('Pinned number of processor instances (no autoscale). Change and redeploy to scale, no code change.')
+@minValue(2)
+param processorInstanceCount int = 3
+
+@description('Processor concurrency per instance (Service Bus MaxConcurrentCalls). Change and redeploy, no code change.')
+@minValue(1)
+param processorMaxConcurrentCalls int = 16
+
+@description('Service Bus prefetch count per processor instance.')
+@minValue(0)
+param processorPrefetchCount int = 32
+
+@description('Runtime stack for the web app. DOTNETCORE|10.0 by default; DOTNETCORE|8.0 is the fallback if .NET 10 is not offered on App Service Linux in the region.')
+@allowed([
+  'DOTNETCORE|10.0'
+  'DOTNETCORE|8.0'
+])
+param processorRuntimeStack string = 'DOTNETCORE|10.0'
+
+@description('Route all outbound traffic of the web app through the VNet. See modules/app-service.bicep.')
+param processorRouteAllTraffic bool = true
+
 @description('Tags applied to the resource group and resources.')
 param tags object = {
   workload: 'transaction-processor-poc'
@@ -122,6 +149,11 @@ var names = {
   serviceBusQueue: 'transactions-recognised'
   eventHubs: '${namePrefix}-eh-${uniqueSuffix}'
   eventHub: 'transactions-unrecognised'
+  // Processor host (ticket 08).
+  appServicePlan: '${namePrefix}-plan'
+  processorApp: '${namePrefix}-app-${uniqueSuffix}'
+  logAnalytics: '${namePrefix}-logs'
+  appInsights: '${namePrefix}-appi'
 }
 
 // ---------------------------------------------------------------------------
@@ -279,11 +311,56 @@ module roleAssignments 'modules/role-assignments.bicep' = {
 // ---------------------------------------------------------------------------
 // SEAMS for later tickets. Add modules here; do not restructure the above.
 //
-// SEAM ticket 08 (processor host): App Service plan and app use
-//   network.outputs.appServiceSubnetId for VNet integration. Attach
-//   identities.outputs.processorIdentityId to the app and set the app's
-//   client-id setting to identities.outputs.processorIdentityClientId.
+// SEAM ticket 08 (processor host): done below. The App Service plan and app use
+//   network.outputs.appServiceSubnetId for VNet integration, have
+//   identities.outputs.processorIdentityId attached, and get the app's
+//   client-id setting from identities.outputs.processorIdentityClientId.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Processor host (ticket 08): Application Insights, then the App Service plan
+// and app. The built package is deployed afterwards by scripts/deploy-app.ps1.
+// ---------------------------------------------------------------------------
+
+module monitoring 'modules/monitoring.bicep' = {
+  name: 'monitoring'
+  scope: rg
+  params: {
+    location: location
+    tags: tags
+    workspaceName: names.logAnalytics
+    appInsightsName: names.appInsights
+  }
+}
+
+module processorHost 'modules/app-service.bicep' = {
+  name: 'processor-host'
+  scope: rg
+  params: {
+    location: location
+    tags: tags
+    planName: names.appServicePlan
+    appName: names.processorApp
+    skuName: appServicePlanSku
+    instanceCount: processorInstanceCount
+    runtimeStack: processorRuntimeStack
+    integrationSubnetId: network.outputs.appServiceSubnetId
+    routeAllTraffic: processorRouteAllTraffic
+    processorIdentityId: identities.outputs.processorIdentityId
+    processorIdentityClientId: identities.outputs.processorIdentityClientId
+    appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+    serviceBusNamespaceFqdn: serviceBus.outputs.namespaceFqdn
+    topicName: serviceBus.outputs.topicName
+    subscriptionName: serviceBus.outputs.subscriptionName
+    queueName: serviceBus.outputs.queueName
+    eventHubsNamespaceFqdn: eventHubs.outputs.namespaceFqdn
+    eventHubName: eventHubs.outputs.eventHubName
+    sqlServerFqdn: sql.outputs.serverFqdn
+    sqlDatabaseName: sql.outputs.databaseName
+    maxConcurrentCalls: processorMaxConcurrentCalls
+    prefetchCount: processorPrefetchCount
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Outputs
@@ -323,3 +400,9 @@ output toolingIdentityId string = identities.outputs.toolingIdentityId
 output toolingIdentityName string = identities.outputs.toolingIdentityName
 output toolingIdentityClientId string = identities.outputs.toolingIdentityClientId
 output toolingIdentityPrincipalId string = identities.outputs.toolingIdentityPrincipalId
+
+// Processor host (ticket 08). deploy-app.ps1 reads these.
+output processorAppName string = processorHost.outputs.appName
+output processorAppHostName string = processorHost.outputs.appDefaultHostName
+output appServicePlanName string = processorHost.outputs.planName
+output appInsightsName string = monitoring.outputs.appInsightsName
