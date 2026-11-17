@@ -38,7 +38,10 @@ public sealed class MessageGenerator
     private readonly double _unmatchedRatio;
     private readonly StringBuilder _builder = new(8 * 1024);
 
-    public MessageGenerator(int seed, double unmatchedRatio = 0.10)
+    /// <summary>The share of load messages with an unknown SKU when not overridden (about 10%, per the spec).</summary>
+    public const double DefaultUnmatchedRatio = 0.10;
+
+    public MessageGenerator(int seed, double unmatchedRatio = DefaultUnmatchedRatio)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(unmatchedRatio, 0.0);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(unmatchedRatio, 1.0);

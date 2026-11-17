@@ -1,12 +1,13 @@
 using System.Globalization;
 using System.Text;
 
+using static RunReport.InvariantText;
+
 namespace RunReport;
 
 /// <summary>The human-readable summary of one run.</summary>
 public static class RunMarkdown
 {
-    private static string Inv(FormattableString text) => text.ToString(CultureInfo.InvariantCulture);
 
     internal static string Seconds(double? value) => value is { } v ? Inv($"{v:0.000} s") : "n/a";
 

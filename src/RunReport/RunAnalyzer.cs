@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using TransactionProcessor;
 
+using static RunReport.InvariantText;
+
 namespace RunReport;
 
 /// <summary>
@@ -18,7 +20,6 @@ public static class RunAnalyzer
     public const string DeadLetterCriterion = "No unexplained dead-letters";
     public const string GeneratorCriterion = "Generator held the target rate";
 
-    private static string Inv(FormattableString text) => text.ToString(CultureInfo.InvariantCulture);
 
     private static CriterionResult Result(string name, bool passed, FormattableString detail) => new(name, passed, Inv(detail));
 

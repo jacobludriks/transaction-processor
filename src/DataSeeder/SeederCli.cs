@@ -45,15 +45,7 @@ public static class SeederCli
             {
                 if (server is null || database is null || clientId is null)
                     throw new ArgumentException("Give --connection-string, or all of --server, --database and --client-id.");
-                connectionString = new SqlConnectionStringBuilder
-                {
-                    DataSource = server,
-                    InitialCatalog = database,
-                    Authentication = SqlAuthenticationMethod.ActiveDirectoryManagedIdentity,
-                    UserID = clientId, // the managed identity's client ID; no secret is involved
-                    Encrypt = SqlConnectionEncryptOption.Mandatory,
-                    ConnectTimeout = 60,
-                }.ConnectionString;
+                connectionString = SqlConnectionStrings.ForManagedIdentity(server, database, clientId, connectTimeoutSeconds: 60);
             }
         }
         catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException)

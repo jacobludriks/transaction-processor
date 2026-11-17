@@ -1,12 +1,13 @@
 using System.Globalization;
 using System.Text;
 
+using static RunReport.InvariantText;
+
 namespace RunReport;
 
 /// <summary>Several saved runs as one markdown table, oldest first, so configurations and results can be compared side by side.</summary>
 public static class RunComparison
 {
-    private static string Inv(FormattableString text) => text.ToString(CultureInfo.InvariantCulture);
 
     public static string ToMarkdown(IEnumerable<RunRecord> runs)
     {
