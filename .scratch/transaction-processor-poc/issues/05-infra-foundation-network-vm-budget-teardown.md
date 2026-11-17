@@ -13,3 +13,7 @@
 - [ ] The tooling VM has the .NET 10 SDK (or runtime) and the tools needed to run the seeder, load generator and SQL scripts
 - [ ] The result of the .NET 10 availability check and the zone-redundancy check for each service in Australia East is recorded in the Bicep README or deployment notes. If .NET 10 isn't available, the fallback is noted
 - [ ] A what-if run is clean before the first real deployment
+
+## Progress note (offline implementation)
+
+Bicep, deploy and teardown scripts and a README with the deployment-time checks are in `infra/`. They pass `az bicep build`, `az bicep lint` and `az bicep build-params`. No criterion is ticked because each one needs a real Azure deployment (or an Azure query) to confirm.
