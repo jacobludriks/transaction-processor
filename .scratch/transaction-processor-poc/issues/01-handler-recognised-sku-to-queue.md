@@ -4,12 +4,12 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The solution builds on .NET 10 and the test suite runs locally with a SQL Server container, with no Azure resources needed
-- [ ] The message contract covers about 40 fields, including `itemId` and `skuId`, and decodes from XML with the standard XML serializer (no XSD validation)
-- [ ] The item table (clustered primary key on the item key, required `ExternalItemId`) and SKU table (clustered primary key on the SKU key) are defined, and the test setup seeds them
-- [ ] A test with an existing item and an existing SKU gets a "send to queue" outcome
-- [ ] The queue JSON contains every decoded field plus `ExternalItemId`, and the test asserts on this output rather than on internal calls
-- [ ] The handler takes the raw message body and returns an outcome. It does not depend on Service Bus types, and outbound sends go through small interfaces so fakes can stand in
-- [ ] The tests check external behaviour only (outcome and payload)
+- [x] The solution builds on .NET 10 and the test suite runs locally with a SQL Server container, with no Azure resources needed
+- [x] The message contract covers about 40 fields, including `itemId` and `skuId`, and decodes from XML with the standard XML serializer (no XSD validation)
+- [x] The item table (clustered primary key on the item key, required `ExternalItemId`) and SKU table (clustered primary key on the SKU key) are defined, and the test setup seeds them
+- [x] A test with an existing item and an existing SKU gets a "send to queue" outcome
+- [x] The queue JSON contains every decoded field plus `ExternalItemId`, and the test asserts on this output rather than on internal calls
+- [x] The handler takes the raw message body and returns an outcome. It does not depend on Service Bus types, and outbound sends go through small interfaces so fakes can stand in
+- [x] The tests check external behaviour only (outcome and payload)
