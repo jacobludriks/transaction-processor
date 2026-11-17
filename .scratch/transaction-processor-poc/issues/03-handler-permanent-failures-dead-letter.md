@@ -6,9 +6,9 @@
 
 **Status:** ready-for-agent
 
-- [ ] Unparseable XML gives a dead-letter outcome with its own distinct reason
-- [ ] A message missing `itemId` gives a dead-letter outcome with its own distinct reason
-- [ ] A message missing `skuId` gives a dead-letter outcome with its own distinct reason
-- [ ] A message whose `itemId` has no row gives a dead-letter outcome with the reason `ItemNotFound`, and nothing is sent to the queue or the event hub
-- [ ] Each reason is a stable, machine-readable value that can be grouped and counted
-- [ ] No dead-letter case triggers a database write or an outbound send
+- [x] Unparseable XML gives a dead-letter outcome with its own distinct reason
+- [x] A message missing `itemId` gives a dead-letter outcome with its own distinct reason
+- [x] A message missing `skuId` gives a dead-letter outcome with its own distinct reason
+- [x] A message whose `itemId` has no row gives a dead-letter outcome with the reason `ItemNotFound`, and nothing is sent to the queue or the event hub
+- [x] Each reason is a stable, machine-readable value that can be grouped and counted
+- [x] No dead-letter case triggers a database write or an outbound send
