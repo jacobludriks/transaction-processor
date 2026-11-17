@@ -20,8 +20,10 @@ public sealed class TransactionHandler(string sqlConnectionString, IQueueSender 
     {
         if (!TryDecode(xmlBody, out var message))
             return new HandlerOutcome.DeadLetter(DeadLetterReasons.InvalidXml);
-        if (message.ItemId is null)
+        if (string.IsNullOrWhiteSpace(message.ItemIdText))
             return new HandlerOutcome.DeadLetter(DeadLetterReasons.MissingItemId);
+        if (message.ItemId is null)
+            return new HandlerOutcome.DeadLetter(DeadLetterReasons.InvalidXml);
         if (string.IsNullOrWhiteSpace(message.SkuId))
             return new HandlerOutcome.DeadLetter(DeadLetterReasons.MissingSkuId);
 
