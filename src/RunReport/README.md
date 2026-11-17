@@ -110,7 +110,7 @@ dotnet run --project src/RunReport -- compare runs --out runs/comparison.md
 - **Measurement window:** the whole minutes inside the generator's run, minus one at each end. Sustained TPS, latency and backlog trend use only this window.
 - **Sustained TPS:** (sent to queue + sent to event hub) in the window divided by the window length; also the lowest and highest minute.
 - **Backlog trend:** least-squares slope of `ActiveMessages` over the window. It counts as growing if the trend adds more than 2 seconds' worth of the target rate over the window (600 messages at 300 TPS). A spike that recovers is not growth.
-- **Latency:** p50/p95/p99 from the per-bucket counts in the window, interpolated linearly inside the bucket. The verdict uses the **upper bound** of the bucket holding p95, so a bucket edge exactly at 2 s passes and anything above fails.
+- **Latency:** p50/p95/p99 from the per-bucket counts in the window, interpolated linearly inside the bucket. The verdict uses the **upper bound** of the bucket holding p95, so the verdict is strictly under 2 s: a bucket that ends exactly at 2 s fails, because p95 could be 2 s. The throughput verdict states its 2% tolerance (294 TPS) in its detail.
 - **Errors and dead-letters:** counted over the whole run by reason. Abandons are errors (redelivered, not lost). Dead-letters are unexplained when their reason is not in `expectedDeadLetterReasons`, or when `DeadletteredMessages` grew by more than the host counted (typically maximum delivery count exceeded).
 - **Reconciliation:** generator sent against queue + event hub + dead-lettered (host-counted plus the Service Bus excess), with the messages still in the backlog at the end of the data treated as in flight. More outputs than sent are reported as duplicates (at-least-once delivery) and do not fail the run. A limitation: duplicates and lost messages in the same run can cancel in the totals.
 
@@ -120,7 +120,7 @@ dotnet run --project src/RunReport -- compare runs --out runs/comparison.md
 |---|---|
 | Sustained throughput | window of at least 10 minutes and sustained TPS of at least 294 (300 less a 2% tolerance) |
 | Backlog not growing | backlog data present and the trend is not growth |
-| p95 latency under 2 s | p95 bucket upper bound is 2 s or less |
+| p95 latency under 2 s | p95 bucket upper bound is below 2 s |
 | Zero lost messages | none lost, and the backlog has drained (no backlog data or a non-empty backlog fails: export again after the drain) |
 | No unexplained dead-letters | none unexplained, and a dead-letter series is present |
 | Generator held the target rate | generator reached at least 98% of its target with no failed sends |
