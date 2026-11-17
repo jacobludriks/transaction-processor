@@ -18,25 +18,65 @@ public sealed class TransactionHandler(string sqlConnectionString, IQueueSender 
 
     public async Task<HandlerOutcome> HandleAsync(string xmlBody, CancellationToken cancellationToken = default)
     {
-        var message = Decode(xmlBody);
+        if (!TryDecode(xmlBody, out var message))
+            return new HandlerOutcome.DeadLetter(DeadLetterReasons.InvalidXml);
+        if (message.ItemId is null)
+            return new HandlerOutcome.DeadLetter(DeadLetterReasons.MissingItemId);
+        if (string.IsNullOrWhiteSpace(message.SkuId))
+            return new HandlerOutcome.DeadLetter(DeadLetterReasons.MissingSkuId);
 
-        // Only the recognised-SKU path exists so far; the other outcomes are added by later tickets.
-        var externalItemId = await FindExternalItemIdAsync(message.ItemId!.Value, cancellationToken)
-            ?? throw new NotImplementedException("Item not found is not handled yet.");
-        if (!await SkuExistsAsync(message.SkuId!, cancellationToken))
+        try
         {
-            await eventHub.SendAsync(ToJson(message, externalItemId), cancellationToken);
-            return new HandlerOutcome.SendToEventHub();
-        }
+            var externalItemId = await FindExternalItemIdAsync(message.ItemId!.Value, cancellationToken);
+            if (externalItemId is null)
+                return new HandlerOutcome.DeadLetter(DeadLetterReasons.ItemNotFound);
+            if (!await SkuExistsAsync(message.SkuId!, cancellationToken))
+            {
+                await SendAsync(eventHub.SendAsync, ToJson(message, externalItemId), cancellationToken);
+                return new HandlerOutcome.SendToEventHub();
+            }
 
-        await queue.SendAsync(ToJson(message, externalItemId), cancellationToken);
-        return new HandlerOutcome.SendToQueue();
+            await SendAsync(queue.SendAsync, ToJson(message, externalItemId), cancellationToken);
+            return new HandlerOutcome.SendToQueue();
+        }
+        // Transient failures only: a database error, or a failed send. Anything else (parse failures,
+        // a missing item) is not caught here, so it is never turned into a retry.
+        catch (Exception ex) when (ex is SqlException or SendFailedException)
+        {
+            return new HandlerOutcome.Retry();
+        }
     }
 
-    private static TransactionMessage Decode(string xmlBody)
+    /// <summary>A send to the queue or event hub failed; the message should be redelivered.</summary>
+    private sealed class SendFailedException(Exception inner) : Exception(inner.Message, inner);
+
+    private static async Task SendAsync(Func<string, CancellationToken, Task> send, string json, CancellationToken cancellationToken)
     {
-        using var reader = XmlReader.Create(new StringReader(xmlBody), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit });
-        return (TransactionMessage)Serializer.Deserialize(reader)!;
+        try
+        {
+            await send(json, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new SendFailedException(ex);
+        }
+    }
+
+    /// <summary>Decodes the body. Returns false when it is not XML that decodes into a transaction message.</summary>
+    private static bool TryDecode(string xmlBody, out TransactionMessage message)
+    {
+        try
+        {
+            using var reader = XmlReader.Create(new StringReader(xmlBody), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit });
+            message = (TransactionMessage)Serializer.Deserialize(reader)!;
+            return true;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or XmlException)
+        {
+            // XmlSerializer wraps XML and conversion errors in InvalidOperationException.
+            message = null!;
+            return false;
+        }
     }
 
     private static string ToJson(TransactionMessage message, string externalItemId)
