@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\TransactionProcessor\TransactionProcessor.csproj" />
+    <ProjectReference Include="..\..\src\DataSeeder\DataSeeder.csproj" />
   </ItemGroup>
 
 </Project>
