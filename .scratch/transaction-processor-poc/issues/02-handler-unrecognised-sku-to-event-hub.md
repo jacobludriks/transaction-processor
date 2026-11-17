@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] A test with an existing item and an unknown SKU gets a "send to event hub" outcome
 - [x] The event hub JSON has exactly the same shape as the queue JSON from ticket 01
