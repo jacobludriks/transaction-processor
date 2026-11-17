@@ -25,18 +25,41 @@ public sealed class TransactionHandler(string sqlConnectionString, IQueueSender 
         if (string.IsNullOrWhiteSpace(message.SkuId))
             return new HandlerOutcome.DeadLetter(DeadLetterReasons.MissingSkuId);
 
-        // Only the recognised-SKU path exists so far; the other outcomes are added by later tickets.
-        var externalItemId = await FindExternalItemIdAsync(message.ItemId!.Value, cancellationToken);
-        if (externalItemId is null)
-            return new HandlerOutcome.DeadLetter(DeadLetterReasons.ItemNotFound);
-        if (!await SkuExistsAsync(message.SkuId!, cancellationToken))
+        try
         {
-            await eventHub.SendAsync(ToJson(message, externalItemId), cancellationToken);
-            return new HandlerOutcome.SendToEventHub();
-        }
+            var externalItemId = await FindExternalItemIdAsync(message.ItemId!.Value, cancellationToken);
+            if (externalItemId is null)
+                return new HandlerOutcome.DeadLetter(DeadLetterReasons.ItemNotFound);
+            if (!await SkuExistsAsync(message.SkuId!, cancellationToken))
+            {
+                await SendAsync(eventHub.SendAsync, ToJson(message, externalItemId), cancellationToken);
+                return new HandlerOutcome.SendToEventHub();
+            }
 
-        await queue.SendAsync(ToJson(message, externalItemId), cancellationToken);
-        return new HandlerOutcome.SendToQueue();
+            await SendAsync(queue.SendAsync, ToJson(message, externalItemId), cancellationToken);
+            return new HandlerOutcome.SendToQueue();
+        }
+        // Transient failures only: a database error, or a failed send. Anything else (parse failures,
+        // a missing item) is not caught here, so it is never turned into a retry.
+        catch (Exception ex) when (ex is SqlException or SendFailedException)
+        {
+            return new HandlerOutcome.Retry();
+        }
+    }
+
+    /// <summary>A send to the queue or event hub failed; the message should be redelivered.</summary>
+    private sealed class SendFailedException(Exception inner) : Exception(inner.Message, inner);
+
+    private static async Task SendAsync(Func<string, CancellationToken, Task> send, string json, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await send(json, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new SendFailedException(ex);
+        }
     }
 
     /// <summary>Decodes the body. Returns false when it is not XML that decodes into a transaction message.</summary>
