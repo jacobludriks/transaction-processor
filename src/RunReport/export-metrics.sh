@@ -7,12 +7,12 @@
 #
 # Usage:
 #   ./export-metrics.sh --app <app insights name> --resource-group <rg> --servicebus <namespace name> \
-#       --start 2026-11-17T09:55:00Z --end 2026-11-17T10:25:00Z --out metrics.json [--subscription processor]
+#       --start 2026-11-17T09:55:00Z --end 2026-11-17T10:25:00Z --out metrics.json [--topic transactions-in]
 #
 # --start should be a few minutes before the generator started; --end a few minutes after the subscription drained.
 set -euo pipefail
 
-APP="" RG="" SB="" START="" END="" OUT="metrics.json" SUBSCRIPTION="processor"
+APP="" RG="" SB="" START="" END="" OUT="metrics.json" TOPIC="transactions-in"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --app) APP="$2"; shift 2 ;;
@@ -21,7 +21,7 @@ while [[ $# -gt 0 ]]; do
     --start) START="$2"; shift 2 ;;
     --end) END="$2"; shift 2 ;;
     --out) OUT="$2"; shift 2 ;;
-    --subscription) SUBSCRIPTION="$2"; shift 2 ;;
+    --topic) TOPIC="$2"; shift 2 ;;
     *) echo "Unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -47,8 +47,20 @@ buckets="$(query latency-buckets.kql | jq '[.tables[0].rows[] | {timestamp: .[0]
 sb_id="$(az servicebus namespace show --name "$SB" --resource-group "$RG" --query id -o tsv)"
 metric() {
   az monitor metrics list --resource "$sb_id" --metric "$1" --aggregation "$2" --interval PT1M \
-    --filter "EntityName eq '$SUBSCRIPTION'" --start-time "$START" --end-time "$END" -o json
+    --filter "EntityName eq '$TOPIC'" --start-time "$START" --end-time "$END" -o json
 }
+
+# Guard: for a topic subscription Azure Monitor reports the EntityName dimension as the TOPIC name, not the subscription
+# name. A filter on a value that does not exist does not fail: it returns a full series of zeros, which the report would
+# read as "no backlog and no dead-letters". So check the value really exists before trusting the series.
+entities="$(az monitor metrics list --resource "$sb_id" --metric ActiveMessages --aggregation Average --interval PT1M \
+  --filter "EntityName eq '*'" --start-time "$START" --end-time "$END" -o json \
+  | jq -r '[.value[0].timeseries[]?.metadatavalues[]?.value] | unique | join(", ")')"
+if ! grep -qwF -- "$TOPIC" <<<"$entities"; then
+  echo "ERROR: Azure Monitor reports no Service Bus entity named '$TOPIC' in this window (entities with data: ${entities:-none})." >&2
+  echo "       Use --topic with one of those names. Refusing to export zero-filled backlog and dead-letter series." >&2
+  exit 3
+fi
 
 echo "Reading the subscription's active-message metric (backlog)..." >&2
 backlog="$(metric ActiveMessages Average | jq '[.value[0].timeseries[0].data[]? | select(.average != null) | {timestamp: .timeStamp, activeMessages: .average}]')"

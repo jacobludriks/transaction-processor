@@ -63,12 +63,12 @@ What it runs, if you prefer to do it by hand:
   ```bash
   SB_ID=$(az servicebus namespace show -n <namespace> -g <rg> --query id -o tsv)
   az monitor metrics list --resource $SB_ID --metric ActiveMessages --aggregation Average --interval PT1M \
-    --filter "EntityName eq 'processor'" --start-time <iso> --end-time <iso>
+    --filter "EntityName eq 'transactions-in'" --start-time <iso> --end-time <iso>
   az monitor metrics list --resource $SB_ID --metric DeadletteredMessages --aggregation Maximum --interval PT1M \
-    --filter "EntityName eq 'processor'" --start-time <iso> --end-time <iso>
+    --filter "EntityName eq 'transactions-in'" --start-time <iso> --end-time <iso>
   ```
 
-  The `EntityName` dimension is expected to be the subscription name. If a metric comes back empty, list the values with `--filter "EntityName eq '*'"` and use what Azure reports.
+  **Verified on the first live run:** for a topic subscription the `EntityName` dimension is the **topic name** (`transactions-in`), not the subscription name. A filter on a value that does not exist does not fail: Azure Monitor returns a full series of zeros, which reads as "no backlog and no dead-letters". The first live analysis passed those two criteria on zeros while 251 messages sat in the dead-letter queue. `export-metrics.sh` now takes `--topic` (default `transactions-in`) and refuses to export if Azure Monitor reports no entity with that name. If you run the commands by hand, list the real values first with `--filter "EntityName eq '*'"`.
 
 Check the metrics are arriving before a long run with `queries/metrics-arriving.kql`: one row per instrument, `instances` should equal the instance count.
 
