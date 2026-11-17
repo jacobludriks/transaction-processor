@@ -88,6 +88,11 @@ param sqlSkuFamily string = 'Gen5'
 @description('SQL database vCores. Redeploy with a different value (for example 6 or 8) to scale between benchmark runs.')
 param sqlSkuCapacity int = 4
 
+// Identities (ticket 07)
+
+@description('Also attach the processor identity to the tooling VM, so the verification script can prove from the VM that the processor identity is refused write access. The VM then holds both identities. Set to false after verification (redeploy) if you want the VM limited to the tooling identity.')
+param attachProcessorIdentityToVm bool = true
+
 @description('Tags applied to the resource group and resources.')
 param tags object = {
   workload: 'transaction-processor-poc'
@@ -105,6 +110,9 @@ var names = {
   vnet: '${namePrefix}-vnet'
   toolingVm: '${namePrefix}-tools-vm'
   budget: '${namePrefix}-budget'
+  // Identities (ticket 07). The names are also the SQL user names.
+  processorIdentity: '${namePrefix}-processor-id'
+  toolingIdentity: '${namePrefix}-tooling-id'
   // Data services (ticket 06). Globally unique names carry the suffix.
   sqlServer: '${namePrefix}-sql-${uniqueSuffix}'
   sqlDatabase: 'txproc'
@@ -157,9 +165,14 @@ module toolingVm 'modules/tooling-vm.bicep' = {
     adminUser: toolingVmAdminUser
     sshPublicKey: sshPublicKey
     subnetId: network.outputs.toolingSubnetId
-    // SEAM ticket 07: pass the tooling user-assigned identity here, for example
-    // userAssignedIdentityIds: [ identities.outputs.toolingIdentityId ]
-    userAssignedIdentityIds: []
+    userAssignedIdentityIds: attachProcessorIdentityToVm
+      ? [
+          identities.outputs.toolingIdentityId
+          identities.outputs.processorIdentityId
+        ]
+      : [
+          identities.outputs.toolingIdentityId
+        ]
   }
 }
 
@@ -230,18 +243,46 @@ module eventHubs 'modules/event-hubs.bicep' = {
 }
 
 // ---------------------------------------------------------------------------
+// Identities and roles (ticket 07). Two user-assigned managed identities and
+// their data-plane role assignments, each scoped to the single topic,
+// subscription, queue or event hub it needs. SQL users for the identities are
+// created by scripts/vm/setup-sql-users.sh, run from the VM as the Entra admin
+// (sqlEntraAdminName).
+// ---------------------------------------------------------------------------
+
+module identities 'modules/identities.bicep' = {
+  name: 'identities'
+  scope: rg
+  params: {
+    location: location
+    tags: tags
+    processorIdentityName: names.processorIdentity
+    toolingIdentityName: names.toolingIdentity
+  }
+}
+
+module roleAssignments 'modules/role-assignments.bicep' = {
+  name: 'role-assignments'
+  scope: rg
+  params: {
+    processorPrincipalId: identities.outputs.processorIdentityPrincipalId
+    toolingPrincipalId: identities.outputs.toolingIdentityPrincipalId
+    serviceBusNamespaceName: serviceBus.outputs.namespaceName
+    topicName: serviceBus.outputs.topicName
+    subscriptionName: serviceBus.outputs.subscriptionName
+    queueName: serviceBus.outputs.queueName
+    eventHubsNamespaceName: eventHubs.outputs.namespaceName
+    eventHubName: eventHubs.outputs.eventHubName
+  }
+}
+
+// ---------------------------------------------------------------------------
 // SEAMS for later tickets. Add modules here; do not restructure the above.
 //
-// SEAM ticket 07 (identities, roles): the data service names and ids are
-//   available as sql.outputs, serviceBus.outputs and eventHubs.outputs for
-//   role assignments and the SQL user setup (Entra admin = sqlEntraAdminName).
-//   Add `module identities 'modules/identities.bicep'`
-//   creating the processor and tooling user-assigned identities and the role
-//   assignments on the ticket 06 resources. Feed the tooling identity id to the
-//   toolingVm module above (userAssignedIdentityIds).
-//
 // SEAM ticket 08 (processor host): App Service plan and app use
-//   network.outputs.appServiceSubnetId for VNet integration.
+//   network.outputs.appServiceSubnetId for VNet integration. Attach
+//   identities.outputs.processorIdentityId to the app and set the app's
+//   client-id setting to identities.outputs.processorIdentityClientId.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -270,3 +311,15 @@ output serviceBusQueueName string = serviceBus.outputs.queueName
 output eventHubsNamespaceName string = eventHubs.outputs.namespaceName
 output eventHubsNamespaceFqdn string = eventHubs.outputs.namespaceFqdn
 output eventHubName string = eventHubs.outputs.eventHubName
+
+// Identities (ticket 07). Ticket 08 attaches the processor identity to the App
+// Service (processorIdentityId) and points the app at it by client ID.
+output sqlEntraAdminName string = sqlEntraAdminName
+output processorIdentityId string = identities.outputs.processorIdentityId
+output processorIdentityName string = identities.outputs.processorIdentityName
+output processorIdentityClientId string = identities.outputs.processorIdentityClientId
+output processorIdentityPrincipalId string = identities.outputs.processorIdentityPrincipalId
+output toolingIdentityId string = identities.outputs.toolingIdentityId
+output toolingIdentityName string = identities.outputs.toolingIdentityName
+output toolingIdentityClientId string = identities.outputs.toolingIdentityClientId
+output toolingIdentityPrincipalId string = identities.outputs.toolingIdentityPrincipalId

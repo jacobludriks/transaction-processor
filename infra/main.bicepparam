@@ -44,3 +44,8 @@ param budgetAlertAmounts = [
   35
   45
 ]
+
+// Identities (ticket 07). The processor identity is also attached to the tooling
+// VM so verify-access.sh can show from the VM that it is refused SQL writes.
+// Set to false and redeploy to leave only the tooling identity on the VM.
+param attachProcessorIdentityToVm = true
