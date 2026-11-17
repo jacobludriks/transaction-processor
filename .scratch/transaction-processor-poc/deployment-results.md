@@ -41,3 +41,34 @@ The output queue and dead-letter queue also hold the `verify-access.sh` probe me
 - SSH refused from other addresses; budget alerts actually existing; Application Insights telemetry arriving (including the `routeAllTraffic` question) and the RunReport queries against real data.
 - Tooling-identity AMQP receive on Event Hubs.
 - Anything at benchmark volume: sustained TPS, latency, the bottleneck, cost per hour.
+
+## Baseline benchmark at 300 TPS (ticket 12)
+
+Configuration: 3 App Service instances (P1v3, zone-redundant), `MaxConcurrentCalls` 16, prefetch 32, Azure SQL General Purpose 4 vCores (**not zone-redundant**), Service Bus Premium 1 MU, private endpoints, 252,000 messages (4 to 6 KB) over 14 minutes, 90% matched SKUs. The load generator ran on the tooling VM.
+
+**Verdict: GO at 300 TPS.** Reports are in `runs/`.
+
+| Criterion | Run 2 (clean) | Run 1 (queue filled) |
+|---|---|---|
+| Sustained throughput | 300.0 TPS over 11 measured minutes (slowest 299.6) | 300.1 TPS (slowest 299.2) |
+| p95 latency (limit 2 s) | about 0.158 s (p50 0.078, p99 0.195) | about 0.135 s |
+| Lost messages | 0 (252,000 in, 252,000 out, 0 duplicates) | 0 counted, 251 dead-lettered |
+| Unexplained dead-letters | 0 | **251, FAIL** |
+| Backlog | peak 95, trend -0.03/s | peak 128 |
+
+Run 1 failed on one criterion, and the cause was the test setup, not the processor. The output queue has no consumer, so it filled to its default 1 GB cap at 10:48:38 (about 224,000 messages), in the last seconds of the run. Sends to it failed and the handler correctly asked for retries, but each message reached Service Bus's 10-delivery limit within seconds, so 251 were dead-lettered. Fix: queue cap raised to 40 GB (a live change; **`maxSizeInMegabytes` is not yet set in the Bicep**), and the dead-letters were drained before run 2. At higher rates the 40 GB cap fills after roughly 160,000 messages per GB-equivalent, so a consumer or purge is needed for longer or faster runs.
+
+### Defects in the measurement tooling found by the live run (fixed)
+
+1. For a topic subscription Azure Monitor reports the `EntityName` dimension as the **topic name**. The export script filtered on the subscription name and silently received zero-filled series, so the backlog and dead-letter criteria passed vacuously on run 1 (a false PASS while 251 messages were in the dead-letter queue). The script now filters on the topic and refuses to export if the entity does not exist. The first (wrong) report was deleted and regenerated.
+2. `routeAllTraffic = true` with no NAT gateway sent no telemetry to Application Insights. It is now false (private endpoints still resolve).
+3. A jq precedence slip in the export script's summary line.
+
+### Caveats on the result
+
+- The database is not zone-redundant. This likely flatters database latency slightly.
+- Duplicates were 0 in run 2 but 306 in run 1 (during the full-queue failure), consistent with at-least-once delivery under failure.
+- The latency figure is the upper edge of the histogram bucket for the verdict; p95 is interpolated within the bucket.
+- The throughput bar is 294 TPS (300 less a 2% tolerance); run 2 was within 0.1% of 300 so the tolerance did not matter.
+- Latency is measured from the Service Bus enqueue time to the output send completing, using the host's clock.
+- Peak TPS and the limiting component have **not** been measured (ticket 13).
