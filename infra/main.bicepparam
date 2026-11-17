@@ -23,6 +23,20 @@ param appServiceSubnetPrefix = '10.20.1.0/24'
 param privateEndpointSubnetPrefix = '10.20.2.0/24'
 param toolingSubnetPrefix = '10.20.3.0/24'
 
+// Data services (ticket 06). SQL uses Entra-only authentication, so there is no
+// password. The admin is personal, so it comes from environment variables
+// (deploy.ps1 sets them from -SqlAdminObjectId and -SqlAdminName).
+param sqlEntraAdminObjectId = readEnvironmentVariable('POC_SQL_ADMIN_OBJECT_ID', '')
+param sqlEntraAdminName = readEnvironmentVariable('POC_SQL_ADMIN_NAME', '')
+
+// SQL tier: General Purpose provisioned, 4 vCores. To scale between runs,
+// change the capacity (deploy.ps1 -SqlSkuCapacity 8) and redeploy; nothing else
+// is rebuilt.
+param sqlSkuName = 'GP_Gen5'
+param sqlSkuTier = 'GeneralPurpose'
+param sqlSkuFamily = 'Gen5'
+param sqlSkuCapacity = int(readEnvironmentVariable('POC_SQL_SKU_CAPACITY', '4'))
+
 // Budget: ceiling AU$50, alerts at AU$20, AU$35 and AU$45.
 param budgetAmount = 50
 param budgetAlertAmounts = [

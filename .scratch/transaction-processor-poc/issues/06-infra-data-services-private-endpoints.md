@@ -13,3 +13,7 @@
 - [ ] The Service Bus topic has exactly one subscription with no filters, and the default maximum delivery count of 10 is in effect
 - [ ] The SQL tier can be changed by a parameter, without rebuilding the environment, so it can be scaled between runs
 - [ ] The zone-redundancy setting for each service is confirmed on the deployed resource, and any service that turned out not to support it is noted
+
+## Progress note (offline implementation)
+
+Bicep for SQL (Entra-only, no password, SKU and vCores as parameters), Service Bus Premium (topic, one subscription, output queue, max delivery count 10), Event Hubs Standard (2 partitions), and a private endpoint with a private DNS zone group for each, all with public network access disabled, is in `infra/` and wired into the same deployment. The deploy script takes the Entra admin and an optional SQL vCore count. The README lists the connectivity, public-access, zone-redundancy and topology checks to run from the VM and from outside. It passes `az bicep build`, `az bicep lint` and `az bicep build-params`. No criterion is ticked because each one needs a real deployment to confirm.

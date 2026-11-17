@@ -22,6 +22,11 @@ param(
   [Parameter(Mandatory)] [string] $BudgetEmail,
   # Public key file for the tooling VM admin user.
   [string] $SshPublicKeyPath = (Join-Path $HOME '.ssh/id_ed25519.pub'),
+  # Entra object id and name of the SQL admin (SQL is Entra-only, no password).
+  [Parameter(Mandatory)] [string] $SqlAdminObjectId,
+  [Parameter(Mandatory)] [string] $SqlAdminName,
+  # SQL vCores. Change between runs to scale the database; the rest is not rebuilt.
+  [ValidateRange(2, 80)] [int] $SqlSkuCapacity = 4,
   # Run what-if instead of deploying.
   [switch] $WhatIf
 )
@@ -43,6 +48,9 @@ if ($cidr -notmatch '^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$') {
 $env:POC_OPERATOR_IP_CIDR = $cidr
 $env:POC_SSH_PUBLIC_KEY = (Get-Content $SshPublicKeyPath -Raw).Trim()
 $env:POC_BUDGET_EMAIL = $BudgetEmail
+$env:POC_SQL_ADMIN_OBJECT_ID = $SqlAdminObjectId
+$env:POC_SQL_ADMIN_NAME = $SqlAdminName
+$env:POC_SQL_SKU_CAPACITY = "$SqlSkuCapacity"
 
 # Region comes from main.bicepparam so there is a single source.
 $location = [regex]::Match((Get-Content $params -Raw), "param location = '([^']+)'").Groups[1].Value
