@@ -25,107 +25,32 @@ public static class RunAnalyzer
 
     public static bool MeetsAll(IEnumerable<CriterionResult> criteria) => criteria.All(c => c.Passed);
 
+    private static readonly GoNoGoCriteria Criteria = new();
+
     public static RunRecord Analyze(
-        RunConfiguration configuration, MetricsExport export, GeneratorSummary generator,
-        DateTimeOffset recordedAtUtc, GoNoGoCriteria? criteria = null)
+        RunConfiguration configuration, MetricsExport export, GeneratorSummary generator, DateTimeOffset recordedAtUtc)
     {
-        criteria ??= new GoNoGoCriteria();
         var warnings = new List<string>();
 
-        var bin = TimeSpan.FromSeconds(export.BinSeconds);
-        var runStart = configuration.StartUtc ?? generator.StartedAtUtc;
-        var runEnd = configuration.EndUtc ?? generator.EndedAtUtc;
-        var firstBin = Floor(runStart, bin);
-        var windowStart = Ceiling(runStart, bin) + bin * criteria.EdgeBinsToTrim;
-        var windowEnd = Floor(runEnd, bin) - bin * criteria.EdgeBinsToTrim;
-        var windowDuration = windowEnd > windowStart ? windowEnd - windowStart : TimeSpan.Zero;
-        var expectedBins = (int)(windowDuration / bin);
-
-        bool InWindow(DateTimeOffset t) => t >= windowStart && t < windowEnd;
-
-        // ---- sustained throughput over the whole minutes inside the run ----
-        var windowOutcomes = export.Outcomes.Where(o => InWindow(o.Timestamp)).ToList();
-        var binsWithData = windowOutcomes.Select(o => o.Timestamp.UtcTicks).Distinct().Count();
-        var outputsByBin = windowOutcomes
-            .Where(o => MessageOutcomes.IsOutput(o.Outcome))
-            .GroupBy(o => o.Timestamp.UtcTicks)
-            .ToDictionary(g => g.Key, g => g.Sum(o => o.Count));
-        var perBinTps = Enumerable.Range(0, expectedBins)
-            .Select(i => outputsByBin.GetValueOrDefault((windowStart + bin * i).UtcTicks) / bin.TotalSeconds)
-            .ToList();
-        var outputsInWindow = outputsByBin.Values.Sum();
-        var sustainedTps = windowDuration > TimeSpan.Zero ? outputsInWindow / windowDuration.TotalSeconds : 0;
-        var throughput = new ThroughputFigures(
-            outputsInWindow, sustainedTps,
-            perBinTps.Count > 0 ? perBinTps.Min() : 0, perBinTps.Count > 0 ? perBinTps.Max() : 0, perBinTps);
-        if (binsWithData < expectedBins)
-            warnings.Add(Inv($"Only {binsWithData} of {expectedBins} minutes in the measurement window have outcome data; the missing minutes count as zero throughput."));
-
-        // ---- latency from the histogram buckets, window only ----
-        var histogram = new LatencyHistogram(export.LatencyBuckets
-            .Where(b => InWindow(b.Timestamp))
-            .Select(b => (b.Le, b.Count)));
-        var p50 = histogram.Percentile(0.50);
-        var p95 = histogram.Percentile(0.95);
-        var p99 = histogram.Percentile(0.99);
-        var latency = new LatencyFigures(
-            histogram.Total, p50?.Estimate, p95?.Estimate, p99?.Estimate, p50?.UpperBound, p95?.UpperBound, p99?.UpperBound);
-        if (histogram.Total == 0) warnings.Add("No latency samples fall inside the measurement window.");
-
-        // ---- backlog trend over the window ----
-        var allBacklog = export.Backlog.OrderBy(b => b.Timestamp).ToList();
-        var windowBacklog = allBacklog.Where(b => InWindow(b.Timestamp)).ToList();
-        var growthThreshold = criteria.BacklogGrowthSecondsOfLoad * generator.TargetRate;
-        var backlog = BacklogTrend(windowBacklog, windowDuration, growthThreshold, allBacklog.Count > 0 ? allBacklog[^1].ActiveMessages : null);
-
-        // ---- outcomes over the whole run (from the first minute of publishing to the end of the data) ----
-        var runOutcomes = export.Outcomes.Where(o => o.Timestamp >= firstBin).ToList();
-        long Total(string outcome) => runOutcomes.Where(o => o.Outcome == outcome).Sum(o => o.Count);
-        IReadOnlyDictionary<string, long> ByReason(string outcome) => runOutcomes
-            .Where(o => o.Outcome == outcome)
-            .GroupBy(o => string.IsNullOrWhiteSpace(o.Reason) ? "unknown" : o.Reason!)
-            .OrderBy(g => g.Key, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.Sum(o => o.Count));
-        var deadLetteredByReason = ByReason(MessageOutcomes.DeadLettered);
-        var abandonedByReason = ByReason(MessageOutcomes.Abandoned);
-        var sentToQueue = Total(MessageOutcomes.SentToQueue);
-        var sentToEventHub = Total(MessageOutcomes.SentToEventHub);
-        var deadLettered = deadLetteredByReason.Values.Sum();
-        var outcomes = new OutcomeFigures(
-            sentToQueue, sentToEventHub, deadLettered, abandonedByReason.Values.Sum(), deadLetteredByReason, abandonedByReason);
-
-        // ---- dead-letters: what the host counted against what Service Bus holds ----
-        var expectedReasons = configuration.ExpectedDeadLetterReasons.ToHashSet(StringComparer.Ordinal);
-        var unexpected = deadLetteredByReason.Where(kv => !expectedReasons.Contains(kv.Key)).Sum(kv => kv.Value);
-        var dlq = export.DeadLetterQueue.OrderBy(d => d.Timestamp).ToList();
-        long serverGrowth = 0, serverUnaccounted = 0;
-        if (dlq.Count > 0)
-        {
-            // Baseline: the last sample before the run (the queue may not have been empty), else the first one.
-            var before = dlq.LastOrDefault(d => d.Timestamp < firstBin) ?? dlq[0];
-            serverGrowth = (long)Math.Max(0, Math.Round(dlq[^1].Messages - before.Messages));
-            serverUnaccounted = Math.Max(0, serverGrowth - deadLettered);
-        }
-        var deadLetters = new DeadLetterFigures(deadLettered, unexpected, dlq.Count > 0, serverGrowth, serverUnaccounted, unexpected + serverUnaccounted);
-
-        // ---- reconciliation against the generator's own count ----
-        var stillInBacklog = (long)Math.Round(backlog.AtEndOfData ?? 0);
-        var accounted = sentToQueue + sentToEventHub + deadLettered + serverUnaccounted;
-        var reconciliation = new ReconciliationFigures(
-            generator.Sent, sentToQueue, sentToEventHub, deadLettered, serverUnaccounted, stillInBacklog, accounted,
-            Lost: Math.Max(0, generator.Sent - accounted - stillInBacklog),
-            Duplicates: Math.Max(0, accounted - generator.Sent));
+        var window = ComputeWindow(configuration, generator, export.BinSeconds);
+        var throughput = MeasureThroughput(export, window, warnings);
+        var latency = MeasureLatency(export, window, warnings);
+        var backlog = MeasureBacklog(export, window, generator);
+        var outcomes = CountOutcomes(export, window);
+        var deadLetters = ReconcileDeadLetters(configuration, export, window, outcomes);
+        var reconciliation = Reconcile(generator, outcomes, deadLetters, backlog);
 
         if (generator.Failed > 0)
             warnings.Add(Inv($"The generator reported {generator.Failed:N0} failed sends. They are not in its sent count and so not in the reconciliation."));
 
-        var window = new MeasurementWindow(windowStart, windowEnd, windowDuration.TotalSeconds, expectedBins, binsWithData, (runEnd - runStart).TotalSeconds);
+        var measurementWindow = new MeasurementWindow(
+            window.Start, window.End, window.Duration.TotalSeconds, window.ExpectedBins, throughput.BinsWithData, (window.RunEnd - window.RunStart).TotalSeconds);
         var verdictCriteria = new List<CriterionResult>
         {
-            ThroughputResult(throughput, window, criteria),
+            ThroughputResult(throughput.Figures, measurementWindow, Criteria),
             BacklogResult(backlog),
-            LatencyResult(latency, criteria),
-            LostResult(reconciliation, backlogHasData: allBacklog.Count > 0),
+            LatencyResult(latency, Criteria),
+            LostResult(reconciliation, backlogHasData: export.Backlog.Count > 0),
             DeadLetterResult(deadLetters),
             generator.HeldTargetRate
                 ? Result(GeneratorCriterion, true, $"Generator achieved {generator.AchievedRate:0.#} msg/s against a target of {generator.TargetRate:0.#}.")
@@ -134,12 +59,12 @@ public static class RunAnalyzer
 
         return new RunRecord
         {
-            Id = MakeId(configuration, runStart),
+            Id = MakeId(configuration, window.RunStart),
             RecordedAtUtc = recordedAtUtc,
-            Configuration = configuration with { StartUtc = runStart, EndUtc = runEnd },
+            Configuration = configuration with { StartUtc = window.RunStart, EndUtc = window.RunEnd },
             Generator = new GeneratorFigures(generator.Sent, generator.Failed, generator.TargetRate, generator.AchievedRate, generator.HeldTargetRate),
-            Window = window,
-            Throughput = throughput,
+            Window = measurementWindow,
+            Throughput = throughput.Figures,
             Backlog = backlog,
             Latency = latency,
             Outcomes = outcomes,
@@ -147,6 +72,120 @@ public static class RunAnalyzer
             Reconciliation = reconciliation,
             Verdict = new Verdict(MeetsAll(verdictCriteria), verdictCriteria, warnings),
         };
+    }
+
+    /// <summary>The run's own span, and the whole-minute measurement window inside it (edge minutes trimmed).</summary>
+    private sealed record RunWindow(
+        DateTimeOffset RunStart, DateTimeOffset RunEnd, DateTimeOffset FirstBin,
+        DateTimeOffset Start, DateTimeOffset End, TimeSpan Duration, TimeSpan Bin, int ExpectedBins)
+    {
+        public bool Contains(DateTimeOffset t) => t >= Start && t < End;
+    }
+
+    private static RunWindow ComputeWindow(RunConfiguration configuration, GeneratorSummary generator, int binSeconds)
+    {
+        var bin = TimeSpan.FromSeconds(binSeconds);
+        var runStart = configuration.StartUtc ?? generator.StartedAtUtc;
+        var runEnd = configuration.EndUtc ?? generator.EndedAtUtc;
+        var start = Ceiling(runStart, bin) + bin * Criteria.EdgeBinsToTrim;
+        var end = Floor(runEnd, bin) - bin * Criteria.EdgeBinsToTrim;
+        var duration = end > start ? end - start : TimeSpan.Zero;
+        return new RunWindow(runStart, runEnd, Floor(runStart, bin), start, end, duration, bin, (int)(duration / bin));
+    }
+
+    private sealed record MeasuredThroughput(ThroughputFigures Figures, int BinsWithData);
+
+    /// <summary>Sustained throughput: outputs per second over the whole minutes inside the run.</summary>
+    private static MeasuredThroughput MeasureThroughput(MetricsExport export, RunWindow window, List<string> warnings)
+    {
+        var windowOutcomes = export.Outcomes.Where(o => window.Contains(o.Timestamp)).ToList();
+        var binsWithData = windowOutcomes.Select(o => o.Timestamp.UtcTicks).Distinct().Count();
+        var outputsByBin = windowOutcomes
+            .Where(o => MessageOutcomes.IsOutput(o.Outcome))
+            .GroupBy(o => o.Timestamp.UtcTicks)
+            .ToDictionary(g => g.Key, g => g.Sum(o => o.Count));
+        var perBinTps = Enumerable.Range(0, window.ExpectedBins)
+            .Select(i => outputsByBin.GetValueOrDefault((window.Start + window.Bin * i).UtcTicks) / window.Bin.TotalSeconds)
+            .ToList();
+        var outputsInWindow = outputsByBin.Values.Sum();
+        var sustainedTps = window.Duration > TimeSpan.Zero ? outputsInWindow / window.Duration.TotalSeconds : 0;
+        if (binsWithData < window.ExpectedBins)
+            warnings.Add(Inv($"Only {binsWithData} of {window.ExpectedBins} minutes in the measurement window have outcome data; the missing minutes count as zero throughput."));
+
+        return new MeasuredThroughput(
+            new ThroughputFigures(
+                outputsInWindow, sustainedTps,
+                perBinTps.Count > 0 ? perBinTps.Min() : 0, perBinTps.Count > 0 ? perBinTps.Max() : 0, perBinTps),
+            binsWithData);
+    }
+
+    /// <summary>Latency percentiles from the histogram buckets, window only.</summary>
+    private static LatencyFigures MeasureLatency(MetricsExport export, RunWindow window, List<string> warnings)
+    {
+        var histogram = new LatencyHistogram(export.LatencyBuckets
+            .Where(b => window.Contains(b.Timestamp))
+            .Select(b => (b.Le, b.Count)));
+        var p50 = histogram.Percentile(0.50);
+        var p95 = histogram.Percentile(0.95);
+        var p99 = histogram.Percentile(0.99);
+        if (histogram.Total == 0) warnings.Add("No latency samples fall inside the measurement window.");
+        return new LatencyFigures(
+            histogram.Total, p50?.Estimate, p95?.Estimate, p99?.Estimate, p50?.UpperBound, p95?.UpperBound, p99?.UpperBound);
+    }
+
+    /// <summary>Backlog trend over the window, plus where the backlog stood at the end of the data.</summary>
+    private static BacklogFigures MeasureBacklog(MetricsExport export, RunWindow window, GeneratorSummary generator)
+    {
+        var allBacklog = export.Backlog.OrderBy(b => b.Timestamp).ToList();
+        var windowBacklog = allBacklog.Where(b => window.Contains(b.Timestamp)).ToList();
+        var growthThreshold = Criteria.BacklogGrowthSecondsOfLoad * generator.TargetRate;
+        return BacklogTrend(windowBacklog, window.Duration, growthThreshold, allBacklog.Count > 0 ? allBacklog[^1].ActiveMessages : null);
+    }
+
+    /// <summary>Outcome counts over the whole run (from the first minute of publishing to the end of the data).</summary>
+    private static OutcomeFigures CountOutcomes(MetricsExport export, RunWindow window)
+    {
+        var runOutcomes = export.Outcomes.Where(o => o.Timestamp >= window.FirstBin).ToList();
+        long Total(string outcome) => runOutcomes.Where(o => o.Outcome == outcome).Sum(o => o.Count);
+        IReadOnlyDictionary<string, long> ByReason(string outcome) => runOutcomes
+            .Where(o => o.Outcome == outcome)
+            .GroupBy(o => string.IsNullOrWhiteSpace(o.Reason) ? "unknown" : o.Reason!)
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Sum(o => o.Count));
+        var deadLetteredByReason = ByReason(MessageOutcomes.DeadLettered);
+        var abandonedByReason = ByReason(MessageOutcomes.Abandoned);
+        return new OutcomeFigures(
+            Total(MessageOutcomes.SentToQueue), Total(MessageOutcomes.SentToEventHub),
+            deadLetteredByReason.Values.Sum(), abandonedByReason.Values.Sum(), deadLetteredByReason, abandonedByReason);
+    }
+
+    /// <summary>Dead-letters: what the host counted against what Service Bus holds.</summary>
+    private static DeadLetterFigures ReconcileDeadLetters(RunConfiguration configuration, MetricsExport export, RunWindow window, OutcomeFigures outcomes)
+    {
+        var expectedReasons = configuration.ExpectedDeadLetterReasons.ToHashSet(StringComparer.Ordinal);
+        var unexpected = outcomes.DeadLetteredByReason.Where(kv => !expectedReasons.Contains(kv.Key)).Sum(kv => kv.Value);
+        var dlq = export.DeadLetterQueue.OrderBy(d => d.Timestamp).ToList();
+        long serverGrowth = 0, serverUnaccounted = 0;
+        if (dlq.Count > 0)
+        {
+            // Baseline: the last sample before the run (the queue may not have been empty), else the first one.
+            var before = dlq.LastOrDefault(d => d.Timestamp < window.FirstBin) ?? dlq[0];
+            serverGrowth = (long)Math.Max(0, Math.Round(dlq[^1].Messages - before.Messages));
+            serverUnaccounted = Math.Max(0, serverGrowth - outcomes.DeadLettered);
+        }
+        return new DeadLetterFigures(outcomes.DeadLettered, unexpected, dlq.Count > 0, serverGrowth, serverUnaccounted, unexpected + serverUnaccounted);
+    }
+
+    /// <summary>Reconciliation against the generator's own count: every message sent is an output, a dead-letter or still in the backlog.</summary>
+    private static ReconciliationFigures Reconcile(
+        GeneratorSummary generator, OutcomeFigures outcomes, DeadLetterFigures deadLetters, BacklogFigures backlog)
+    {
+        var stillInBacklog = (long)Math.Round(backlog.AtEndOfData ?? 0);
+        var accounted = outcomes.SentToQueue + outcomes.SentToEventHub + outcomes.DeadLettered + deadLetters.ServerSideUnaccounted;
+        return new ReconciliationFigures(
+            generator.Sent, outcomes.SentToQueue, outcomes.SentToEventHub, outcomes.DeadLettered, deadLetters.ServerSideUnaccounted, stillInBacklog, accounted,
+            Lost: Math.Max(0, generator.Sent - accounted - stillInBacklog),
+            Duplicates: Math.Max(0, accounted - generator.Sent));
     }
 
     private static BacklogFigures BacklogTrend(List<BacklogSample> window, TimeSpan windowDuration, double growthThreshold, double? atEndOfData)
