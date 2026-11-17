@@ -56,7 +56,7 @@ Configuration: 3 App Service instances (P1v3, zone-redundant), `MaxConcurrentCal
 | Unexplained dead-letters | 0 | **251, FAIL** |
 | Backlog | peak 95, trend -0.03/s | peak 128 |
 
-Run 1 failed on one criterion, and the cause was the test setup, not the processor. The output queue has no consumer, so it filled to its default 1 GB cap at 10:48:38 (about 224,000 messages), in the last seconds of the run. Sends to it failed and the handler correctly asked for retries, but each message reached Service Bus's 10-delivery limit within seconds, so 251 were dead-lettered. Fix: queue cap raised to 40 GB (a live change; **`maxSizeInMegabytes` is not yet set in the Bicep**), and the dead-letters were drained before run 2. At higher rates the 40 GB cap fills after roughly 160,000 messages per GB-equivalent, so a consumer or purge is needed for longer or faster runs.
+Run 1 failed on one criterion, and the cause was the test setup, not the processor. The output queue has no consumer, so it filled to its default 1 GB cap at 10:48:38 (about 224,000 messages), in the last seconds of the run. Sends to it failed and the handler correctly asked for retries, but each message reached Service Bus's 10-delivery limit within seconds, so 251 were dead-lettered. Fix: queue cap raised to 40 GB (a live change; **`maxSizeInMegabytes` is not yet set in the Bicep**), and the dead-letters were drained before run 2. A 40 GB cap holds roughly 9.5 million messages of this size, hours of traffic even at 600 TPS, so it is not a constraint for the peak runs, but nothing drains the queue, so purge it between sessions.
 
 ### Defects in the measurement tooling found by the live run (fixed)
 

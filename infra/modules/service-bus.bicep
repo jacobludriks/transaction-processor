@@ -71,6 +71,9 @@ resource queue 'Microsoft.ServiceBus/namespaces/queues@2024-01-01' = {
   name: queueName
   properties: {
     maxDeliveryCount: maxDeliveryCount
+    // Nothing consumes this queue in the POC. The 1 GB default filled in the last seconds of a 14 minute run at 300 TPS
+    // (about 224,000 messages of 4 KB), and the failed sends dead-lettered 251 messages. 40 GB is the next valid size.
+    maxSizeInMegabytes: 40960
   }
 }
 
