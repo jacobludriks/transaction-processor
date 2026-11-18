@@ -34,7 +34,9 @@ param(
   # Processor host: pinned instance count and Service Bus concurrency per instance. Configuration only, no code change.
   [ValidateRange(2, 30)] [int] $ProcessorInstanceCount = 3,
   [ValidateRange(1, 10000)] [int] $MaxConcurrentCalls = 16,
-  [ValidateRange(0, 100000)] [int] $PrefetchCount = 32,
+  [ValidateRange(0, 100000)] [int] $PrefetchCount = 150,
+  # Service Bus processors (connections) per instance; concurrency and prefetch are split between them.
+  [ValidateRange(1, 64)] [int] $ProcessorCount = 4,
   # Web app runtime. Use DOTNETCORE|8.0 only if .NET 10 is not offered on App Service Linux in the region.
   [ValidateSet('DOTNETCORE|10.0', 'DOTNETCORE|8.0')] [string] $RuntimeStack = 'DOTNETCORE|10.0',
   # Run what-if instead of deploying.
@@ -66,6 +68,7 @@ $env:POC_SQL_BACKUP_REDUNDANCY = $SqlBackupRedundancy
 $env:POC_PROCESSOR_INSTANCE_COUNT = "$ProcessorInstanceCount"
 $env:POC_MAX_CONCURRENT_CALLS = "$MaxConcurrentCalls"
 $env:POC_PREFETCH_COUNT = "$PrefetchCount"
+$env:POC_PROCESSOR_COUNT = "$ProcessorCount"
 $env:POC_RUNTIME_STACK = $RuntimeStack
 
 # Region comes from main.bicepparam so there is a single source.

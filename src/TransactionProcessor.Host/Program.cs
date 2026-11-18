@@ -35,14 +35,17 @@ builder.Services.AddSingleton<TokenCredential>(sp =>
         ManagedIdentityClientId = sp.GetRequiredService<IOptions<ProcessorOptions>>().Value.ManagedIdentityClientId,
     }));
 
-builder.Services.AddSingleton(sp =>
-    new ServiceBusClient(sp.GetRequiredService<IOptions<ProcessorOptions>>().Value.ServiceBusNamespace, sp.GetRequiredService<TokenCredential>()));
+// The output senders own their clients (the queue sender its own Service Bus connection, separate from the
+// receive loop's) and combine concurrent sends into batch sends.
 builder.Services.AddSingleton<IQueueSender>(sp =>
-    new ServiceBusQueueSender(sp.GetRequiredService<ServiceBusClient>(), sp.GetRequiredService<IOptions<ProcessorOptions>>().Value.QueueName));
+{
+    var o = sp.GetRequiredService<IOptions<ProcessorOptions>>().Value;
+    return new ServiceBusQueueSender(o.ServiceBusNamespace, o.QueueName, sp.GetRequiredService<TokenCredential>(), sp.GetRequiredService<ProcessorMetrics>());
+});
 builder.Services.AddSingleton<IEventHubSender>(sp =>
 {
     var o = sp.GetRequiredService<IOptions<ProcessorOptions>>().Value;
-    return new EventHubProducerSender(o.EventHubsNamespace, o.EventHubName, sp.GetRequiredService<TokenCredential>());
+    return new EventHubProducerSender(o.EventHubsNamespace, o.EventHubName, sp.GetRequiredService<TokenCredential>(), sp.GetRequiredService<ProcessorMetrics>());
 });
 builder.Services.AddSingleton(sp =>
 {

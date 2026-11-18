@@ -63,7 +63,8 @@ param attachProcessorIdentityToVm = true
 param appServicePlanSku = 'P1v3'
 param processorInstanceCount = int(readEnvironmentVariable('POC_PROCESSOR_INSTANCE_COUNT', '3'))
 param processorMaxConcurrentCalls = int(readEnvironmentVariable('POC_MAX_CONCURRENT_CALLS', '16'))
-param processorPrefetchCount = int(readEnvironmentVariable('POC_PREFETCH_COUNT', '32'))
+param processorPrefetchCount = int(readEnvironmentVariable('POC_PREFETCH_COUNT', '150'))
+param processorCount = int(readEnvironmentVariable('POC_PROCESSOR_COUNT', '4'))
 param processorRuntimeStack = readEnvironmentVariable('POC_RUNTIME_STACK', 'DOTNETCORE|10.0')
 // false: only private (RFC1918) traffic goes through the VNet, so the private endpoints still work
 // and Application Insights ingestion leaves through App Service's own outbound path. With true and

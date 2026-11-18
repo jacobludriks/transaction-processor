@@ -21,7 +21,7 @@ Subscription-scope Bicep for the transaction processor POC. One command deploys,
 | `scripts/vm/setup-sql-users.sh`, `setup-sql-users.sql` | Run on the VM as the Entra admin: creates a contained SQL user per identity and grants roles. Idempotent. |
 | `scripts/vm/verify-access.sh` | Run on the VM: proves each identity can do what it should and is refused the rest. |
 | `modules/monitoring.bicep`, `modules/app-service.bicep` | Application Insights, and the processor host: App Service plan (Linux, P1v3, zone-redundant, 3 pinned instances) and web app (see "Processor host"). |
-| `scripts/deploy.ps1` | One-command deploy (or `-WhatIf`). Also takes `-ProcessorInstanceCount`, `-MaxConcurrentCalls`, `-PrefetchCount`, `-RuntimeStack`. |
+| `scripts/deploy.ps1` | One-command deploy (or `-WhatIf`). Also takes `-ProcessorInstanceCount`, `-MaxConcurrentCalls`, `-PrefetchCount`, `-ProcessorCount`, `-RuntimeStack`. |
 | `scripts/deploy-app.ps1` | Publishes the host and deploys the package to the web app (run after `deploy.ps1`). |
 | `scripts/teardown.ps1` | One-command delete of the resource group. |
 
@@ -146,8 +146,9 @@ All settings are plain app settings on the web app, set from Bicep. On App Servi
 | `Processor__ServiceBusNamespace`, `__TopicName`, `__SubscriptionName`, `__QueueName` | Service Bus module outputs |
 | `Processor__EventHubsNamespace`, `__EventHubName` | Event Hubs module outputs |
 | `Processor__SqlServer`, `__SqlDatabase` | SQL module outputs |
-| `Processor__MaxConcurrentCalls` | `processorMaxConcurrentCalls` (default 16; `deploy.ps1 -MaxConcurrentCalls`, env `POC_MAX_CONCURRENT_CALLS`) |
-| `Processor__PrefetchCount` | `processorPrefetchCount` (default 32; `deploy.ps1 -PrefetchCount`, env `POC_PREFETCH_COUNT`) |
+| `Processor__MaxConcurrentCalls` | `processorMaxConcurrentCalls` (default 16, total per instance; `deploy.ps1 -MaxConcurrentCalls`, env `POC_MAX_CONCURRENT_CALLS`) |
+| `Processor__PrefetchCount` | `processorPrefetchCount` (default 150, total per instance; `deploy.ps1 -PrefetchCount`, env `POC_PREFETCH_COUNT`). Keep it at or above the concurrency. |
+| `Processor__ProcessorCount` | `processorCount` (default 4; `deploy.ps1 -ProcessorCount`, env `POC_PROCESSOR_COUNT`). Service Bus processors per instance, each with its own connection; concurrency and prefetch are split between them. Must not exceed the concurrency. |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | the Application Insights component. Telemetry is off when it is not set (local runs). |
 
 The instance count is `processorInstanceCount` (default 3; `deploy.ps1 -ProcessorInstanceCount`, env `POC_PROCESSOR_INSTANCE_COUNT`). To change concurrency or instance count between benchmark runs, redeploy with the new value; nothing else is rebuilt and the app restarts with the new setting. The host refuses to start (and `/health` never goes green) if a required setting is missing.
