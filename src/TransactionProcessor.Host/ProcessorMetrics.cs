@@ -18,6 +18,8 @@ namespace TransactionProcessor.Host;
 /// <item><c>txproc.message.latency.bucket</c>: the same latency as a plain counter per bucket, tag <c>le</c>
 /// (the bucket's upper bound in seconds, or <c>+Inf</c>) and <c>destination</c>. Application Insights keeps only
 /// count, sum, min and max of a histogram, not its buckets, so this counter is what percentiles are computed from.</item>
+/// <item><c>txproc.output.batch.size</c>: histogram of messages per output batch send, tag <c>destination</c>.
+/// Its sum over its count is the average batch size, which shows how much the sends are being combined.</item>
 /// </list>
 /// </summary>
 public sealed class ProcessorMetrics
@@ -27,6 +29,7 @@ public sealed class ProcessorMetrics
     public const string MessagesInstrument = "txproc.messages";
     public const string LatencyInstrument = "txproc.message.latency";
     public const string LatencyBucketInstrument = "txproc.message.latency.bucket";
+    public const string OutputBatchSizeInstrument = "txproc.output.batch.size";
 
     /// <summary>
     /// Latency bucket upper bounds, in seconds. Dense around the 2 s p95 target (1 to 3 s) so that a p95 close to
@@ -42,19 +45,25 @@ public sealed class ProcessorMetrics
     private readonly Counter<long> _messages;
     private readonly Histogram<double> _latency;
     private readonly Counter<long> _latencyBuckets;
+    private readonly Histogram<int> _outputBatchSize;
 
     public ProcessorMetrics()
     {
         _messages = Meter.CreateCounter<long>(MessagesInstrument, "{message}", "Messages handled, by outcome");
         _latency = Meter.CreateHistogram<double>(LatencyInstrument, "s", "Service Bus enqueue time to output send completed");
         _latencyBuckets = Meter.CreateCounter<long>(LatencyBucketInstrument, "{message}", "Latency counted per bucket upper bound (le)");
+        _outputBatchSize = Meter.CreateHistogram<int>(OutputBatchSizeInstrument, "{message}", "Messages per output batch send");
     }
 
     /// <param name="latencySeconds">Enqueue-to-output-sent latency, or null when the enqueue time is unknown (the message is then counted but adds no latency sample).</param>
-    public void SentToQueue(double? latencySeconds = null) => Sent(MessageOutcomes.SentToQueue, "queue", latencySeconds);
+    public void SentToQueue(double? latencySeconds = null) => Sent(MessageOutcomes.SentToQueue, OutputDestinations.Queue, latencySeconds);
 
     /// <inheritdoc cref="SentToQueue"/>
-    public void SentToEventHub(double? latencySeconds = null) => Sent(MessageOutcomes.SentToEventHub, "event_hub", latencySeconds);
+    public void SentToEventHub(double? latencySeconds = null) => Sent(MessageOutcomes.SentToEventHub, OutputDestinations.EventHub, latencySeconds);
+
+    /// <summary>Records one successful output batch send of <paramref name="size"/> messages.</summary>
+    public void OutputBatchSent(string destination, int size) =>
+        _outputBatchSize.Record(size, new TagList { { "destination", destination } });
 
     public void DeadLettered(string reason) =>
         _messages.Add(1, new TagList { { "outcome", MessageOutcomes.DeadLettered }, { "reason", reason } });

@@ -1,0 +1,15 @@
+customMetrics
+| where timestamp > datetime(__START__)
+| where name in ("txproc.messages", "txproc.message.latency", "txproc.output.batch.size")
+| extend outcome = tostring(customDimensions.outcome)
+| summarize
+    sent = sumif(coalesce(valueSum, value), name == "txproc.messages" and outcome startswith "sent"),
+    other = sumif(coalesce(valueSum, value), name == "txproc.messages" and not(outcome startswith "sent")),
+    latAvg = sumif(valueSum, name == "txproc.message.latency") / sumif(valueCount, name == "txproc.message.latency"),
+    latMax = maxif(valueMax, name == "txproc.message.latency"),
+    batchAvg = sumif(valueSum, name == "txproc.output.batch.size") / sumif(valueCount, name == "txproc.output.batch.size"),
+    batchMax = maxif(valueMax, name == "txproc.output.batch.size")
+  by minute = bin(timestamp, 1m)
+| extend perSec = round(sent / 60.0, 0), latAvg = round(latAvg, 3), latMax = round(latMax, 2), batchAvg = round(batchAvg, 1)
+| project minute, perSec, other, latAvg, latMax, batchAvg, batchMax
+| order by minute asc

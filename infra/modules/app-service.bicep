@@ -73,9 +73,14 @@ param sqlDatabaseName string
 @minValue(1)
 param maxConcurrentCalls int = 16
 
-@description('Service Bus prefetch count per instance.')
+@description('Service Bus prefetch count per instance, split across its processors.')
 @minValue(0)
-param prefetchCount int = 32
+param prefetchCount int = 150
+
+@description('Service Bus processors per instance, each with its own connection. Concurrency and prefetch are split between them.')
+@minValue(1)
+@maxValue(64)
+param processorCount int = 4
 
 resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: planName
@@ -131,6 +136,7 @@ resource app 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'Processor__SqlDatabase', value: sqlDatabaseName }
         { name: 'Processor__MaxConcurrentCalls', value: string(maxConcurrentCalls) }
         { name: 'Processor__PrefetchCount', value: string(prefetchCount) }
+        { name: 'Processor__ProcessorCount', value: string(processorCount) }
       ]
     }
   }

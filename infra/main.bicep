@@ -113,9 +113,14 @@ param processorInstanceCount int = 3
 @minValue(1)
 param processorMaxConcurrentCalls int = 16
 
-@description('Service Bus prefetch count per processor instance.')
+@description('Service Bus prefetch count per processor instance, split across its processors. Keep it at or above processorMaxConcurrentCalls.')
 @minValue(0)
-param processorPrefetchCount int = 32
+param processorPrefetchCount int = 150
+
+@description('Service Bus processors per instance, each with its own connection; concurrency and prefetch are split between them. Must not exceed processorMaxConcurrentCalls.')
+@minValue(1)
+@maxValue(64)
+param processorCount int = 4
 
 @description('Runtime stack for the web app. DOTNETCORE|10.0 by default; DOTNETCORE|8.0 is the fallback if .NET 10 is not offered on App Service Linux in the region.')
 @allowed([
@@ -368,6 +373,7 @@ module processorHost 'modules/app-service.bicep' = {
     sqlDatabaseName: sql.outputs.databaseName
     maxConcurrentCalls: processorMaxConcurrentCalls
     prefetchCount: processorPrefetchCount
+    processorCount: processorCount
   }
 }
 
