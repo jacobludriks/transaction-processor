@@ -135,3 +135,58 @@ To go higher than the baseline, add instances: it is the lever that worked, and 
 - **Indicative cost per million messages** at the 3-instance peak (about 750 msg/s, 2.7 million messages per hour, AU$4 to 6 per hour): roughly AU$1.5 to 2.2. This inherits the same uncertainty and ignores that the ceiling was not reached on every resource, so treat it as an order of magnitude.
 - **Teardown:** `teardown.ps1 -Force` deleted the resource group and returned "Nothing left behind". Verified independently afterwards: the group does not exist, the deployment record is gone, no resource tagged for the POC remains in the subscription, and the budget was removed (it showed in a listing for a short time after the group was deleted, then disappeared; the listing was stale).
 - **Not deployed again from scratch:** the corrected VM bootstrap (cloud-init) and the SQL zone-redundancy parameter have only been exercised as live edits plus a template build, not by a clean redeployment.
+
+## Service Bus client-path changes (2026-11-18, branch `perf/service-bus-client-path`)
+
+Fresh deployment from scratch (the corrected cloud-init worked first time; SQL again not zone-redundant). Configuration for both tests: 3 instances (P1v3), `MaxConcurrentCalls` 48, Service Bus Premium **1 MU**, SQL GP 4 vCores, same message mix and 6-minute steps as ticket 13. Output send batching was **on in both tests**, so neither is a clean single-variable comparison with ticket 13 (the user accepted this).
+
+- **Test A:** 1 processor per instance, prefetch 150 (was 32), batched output sends.
+- **Test B:** as A, plus 4 processors per instance, each with its own Service Bus connection. Switched with the `Processor__ProcessorCount` app setting.
+
+| Test | Target msg/s | Sustained | p50 / p95 / p99 | Backlog | Dead-letters |
+|---|---|---|---|---|---|
+| A | 1,000 | 1,000 | 0.1 / 0.2 / 0.3 s | stable | 0 |
+| A | 1,300 | 1,300 | 0.1 / 0.3 / 0.5 s | stable | 0 |
+| A | 1,600 | 1,670 to 1,800 while catching up | over 30 s (see note) | 14,400 at end, drained in 11 s | 0 |
+| A | 2,000 | about 1,620 | over 30 s | **growing** | 0 |
+| B | 1,000 | 1,000 | 0.1 / 0.3 / 0.3 s | stable | 0 |
+| B | 1,300 | 1,300 | 0.2 / 0.3 / 0.3 s | stable | 0 |
+| B | 1,600 | 1,600 | 0.2 / 0.5 / 0.75 s | stable | 0 |
+| B | 2,000 | about 1,540 | over 30 s | **growing** | 0 |
+
+Latency percentiles are bucket upper bounds from `txproc.message.latency.bucket`. Average output batch size was about 4 (max 44) under load.
+
+**Result.** The 3-instance ceiling rose from about 700 to 740 msg/s (ticket 13) to about **1,550 to 1,650 msg/s**, roughly 530 msg/s per instance against 240 before. Test B held 1,600 cleanly; test A probably could too (it drained at up to 1,800 msg/s), but a stall at the start of that step pushed it into backlog. The separate connections (B) did not raise the ceiling over A: the gain came from prefetch and batching.
+
+**Test A stall at 09:03 UTC.** All three instances dropped to about a third of their rate for one minute at the same time, then recovered. No exceptions or warnings in Application Insights, no Service Bus throttling or server errors, SQL and App Service CPU normal. Cause unknown; because it hit every instance together, it was most likely on the Service Bus side.
+
+**What limits it now.** Probably Service Bus at 1 MU. Namespace CPU climbed with load to 73 to 76% at a clean 1,600 and about 80% at the saturated 2,000 step, with memory rising as the backlog grew. Microsoft's guidance is to add messaging units at around 70% CPU. Everything else had headroom: App Service CPU 28 to 35%, memory 33%, SQL CPU 22 to 27%. When the generator stopped at the end of test B's 2,000 step (removing its publish load from the namespace), the processors drained at about 1,900 msg/s. Not yet confirmed by a 2 MU run.
+
+Raw inputs: `runs/ramp-raw-20261118/` (step logs, generator summaries and the two KQL queries used).
+
+### Resource use by load (2026-11-18)
+
+Azure Monitor, per-minute values over each step's steady window (first and last minute dropped). "avg / peak" is the mean of the per-minute values and the highest single minute. App Service CPU is the plan average across the 3 instances, and its peak is the busiest single instance in any minute. The database is **Azure SQL Database General Purpose 4 vCores**, not Managed Instance, as throughout the POC.
+
+| Load (msg/s) | Test | Outcome | App Service CPU avg / peak instance | App Service memory | SQL CPU avg / peak | SQL workers peak | Service Bus CPU avg / peak | Service Bus memory peak |
+|---|---|---|---|---|---|---|---|---|
+| 350 | A | held, p95 0.1 s | 12% / 19% | 33% | 5% / 5% | 4% | 27% / 34% | 53% |
+| 700 | A | held, p95 0.2 s | 15% / 17% | 33% | 10% / 10% | 1% | 40% / 43% | 52% |
+| 1,000 | A | held, p95 0.2 s | 19% / 25% | 33% | 13% / 14% | 17% | 42% / 55% | 52% |
+| 1,000 | B | held, p95 0.3 s | 24% / 28% | 34% | 13% / 14% | 2% | 42% / 58% | 64% |
+| 1,300 | A | held, p95 0.3 s | 25% / 30% | 33% | 18% / 19% | 30% | 55% / 60% | 70% |
+| 1,300 | B | held, p95 0.3 s | 27% / 30% | 34% | 18% / 19% | 2% | 62% / 64% | 43% |
+| 1,600 | A | stall, then backlog | 28% / 36% | 34% | 20% / 27% | 2% | 70% / 75% | 87% |
+| 1,600 | B | held, p95 0.5 s | 31% / 35% | 33% | 22% / 24% | 2% | 70% / 76% | 44% |
+| 2,000 | A | saturated, ~1,620 | 32% / 43% | 34% | 23% / 26% | 2% | 68% / 73% | 65% |
+| 2,000 | B | saturated, ~1,540 | 30% / 35% | 33% | 22% / 23% | 2% | 76% / 82% | 72% |
+
+In every step: Service Bus throttled requests 0 and server errors 0; SQL log write and data I/O 0% (the 2 million reference rows are served from memory); SQL sessions under 1%. The SQL worker peaks of 17% and 30% in test A's first two steps were short spikes in single minutes, most likely the connection pool filling after the app's cold start; from then on workers stayed at 2% or below. The 350 and 700 msg/s rows were run afterwards (09:57 to 10:09 UTC) as a separate pass in the test A configuration, with 4-minute steady windows; at 700, one message in one minute had a latency of 60 s (p99 was still 0.3 s, no abandons or dead-letters). Raw per-minute values: `runs/ramp-raw-20261118/azure-monitor-per-minute.tsv` and `azure-monitor-per-minute-350-700.tsv`; generator summaries in `testA2-step-350.json` and `testA2-step-700.json`.
+
+**Trade-offs this shows**
+
+- **Service Bus (Premium, 1 MU) is the resource that runs out first.** Namespace CPU rises roughly in step with load: about 27% at 350 msg/s, 40% at 700, 42% at 1,000, 55 to 62% at 1,300, 70% at 1,600, and around 80% when saturated. Microsoft's guidance is to add messaging units at about 70% CPU, so **1 MU reaches that guideline at about 1,600 msg/s** for this workload; plan on about 1,500 for margin. Each transaction costs the namespace three operations: the publish to the topic, the delivery to the processor and the output to the queue (or event hub). Going further means a second messaging unit, and Premium is billed per unit, so that step roughly doubles the Service Bus cost. The ticket 13 result that a second unit made no difference no longer applies: the processor used to be the limit, now Service Bus is.
+- **App Service has the most headroom.** At 1,600 msg/s the three P1v3 instances averaged about 30% CPU (busiest instance 35%) and about 33% memory. That is about 530 msg/s per instance at a third of CPU, so the plan is over-provisioned for this load. Fewer or smaller instances were not measured: the per-instance ceiling before these changes was not set by CPU, so do not assume CPU scales linearly to 100%. Zone redundancy also sets a minimum instance count.
+- **Separate connections per instance (test B) cost CPU but gave no throughput.** At 1,000 msg/s, 4 processors per instance used about 5 points more App Service CPU than 1 (24% against 19%), and the saturation point was the same within noise. `ProcessorCount` 1 is the cheaper setting unless a later run shows a benefit.
+- **SQL (4 vCores) is lightly used.** CPU rose by about 1.4 points per 100 msg/s, to about 22% at 1,600 msg/s, with no I/O or log pressure. By that rate, 2 vCores would sit around 45% at 1,600 msg/s, but this is an extrapolation, not a measurement. Combining the two lookups into one query (recommendation 5) would cut the database's request rate in half and make a smaller tier more comfortable. The in-memory cache is still not needed.
+- **At the 300 msg/s production target**, every resource is far below its limit. At 350 msg/s, the closest measured point: App Service 12% CPU, SQL 5%, Service Bus 27%, p95 0.1 s. At double that (700 msg/s): 15%, 10% and 40%, p95 0.2 s. App Service CPU does not fall in proportion to load (12% at 350 against 30% at 1,600), because part of it is a fixed cost of running the host and its telemetry. SQL CPU does scale in proportion (5% at 350, 10% at 700, 22% at 1,600). The sizing question is about how much margin to buy, not about meeting the target.

@@ -1,0 +1,20 @@
+let steps = datatable(step:string, s:datetime, e:datetime) [__STEPS__];
+customMetrics
+| where timestamp between (datetime(__FROM__) .. datetime(__TO__))
+| where name == "txproc.message.latency.bucket"
+| extend le = tostring(customDimensions.le), c = coalesce(valueSum, value)
+| extend k = 1
+| join kind=inner (steps | extend k = 1) on k
+| where timestamp >= s and timestamp < e
+| summarize cnt = sum(c) by step, le
+| extend leNum = iff(le == "+Inf", 1e9, todouble(le))
+| order by step asc, leNum asc
+| extend cum = row_cumsum(cnt, step != prev(step))
+| join kind=inner (customMetrics
+    | where timestamp between (datetime(__FROM__) .. datetime(__TO__))
+    | where name == "txproc.message.latency.bucket"
+    | extend k = 1 | join kind=inner (steps | extend k = 1) on k
+    | where timestamp >= s and timestamp < e
+    | summarize total = sum(coalesce(valueSum, value)) by step) on step
+| summarize p50 = minif(leNum, cum >= 0.5 * total), p95 = minif(leNum, cum >= 0.95 * total), p99 = minif(leNum, cum >= 0.99 * total), total = max(total) by step
+| order by step asc
