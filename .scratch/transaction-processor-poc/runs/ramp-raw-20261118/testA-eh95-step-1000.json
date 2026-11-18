@@ -1,0 +1,17 @@
+{
+  "startedAtUtc": "2026-11-18T10:38:01.2537368+00:00",
+  "endedAtUtc": "2026-11-18T10:43:01.5868603+00:00",
+  "elapsedSeconds": 300.3331235,
+  "targetRate": 1000,
+  "sent": 300000,
+  "failed": 0,
+  "achievedRate": 998.8908199797683,
+  "heldTargetRate": true,
+  "firstError": null,
+  "unmatchedRatio": 0.95,
+  "senders": 4,
+  "batchSize": 100,
+  "seed": 1000,
+  "topic": "transactions-in",
+  "dryRun": false
+}

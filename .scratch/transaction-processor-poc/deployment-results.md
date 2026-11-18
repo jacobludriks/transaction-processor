@@ -190,3 +190,27 @@ In every step: Service Bus throttled requests 0 and server errors 0; SQL log wri
 - **Separate connections per instance (test B) cost CPU but gave no throughput.** At 1,000 msg/s, 4 processors per instance used about 5 points more App Service CPU than 1 (24% against 19%), and the saturation point was the same within noise. `ProcessorCount` 1 is the cheaper setting unless a later run shows a benefit.
 - **SQL (4 vCores) is lightly used.** CPU rose by about 1.4 points per 100 msg/s, to about 22% at 1,600 msg/s, with no I/O or log pressure. By that rate, 2 vCores would sit around 45% at 1,600 msg/s, but this is an extrapolation, not a measurement. Combining the two lookups into one query (recommendation 5) would cut the database's request rate in half and make a smaller tier more comfortable. The in-memory cache is still not needed.
 - **At the 300 msg/s production target**, every resource is far below its limit. At 350 msg/s, the closest measured point: App Service 12% CPU, SQL 5%, Service Bus 27%, p95 0.1 s. At double that (700 msg/s): 15%, 10% and 40%, p95 0.2 s. App Service CPU does not fall in proportion to load (12% at 350 against 30% at 1,600), because part of it is a fixed cost of running the host and its telemetry. SQL CPU does scale in proportion (5% at 350, 10% at 700, 22% at 1,600). The sizing question is about how much margin to buy, not about meeting the target.
+
+### Test A with 95% of output to Event Hubs (2026-11-18, 10:27 to 10:48 UTC)
+
+Same configuration as test A (3 × P1v3, `MaxConcurrentCalls` 48, `ProcessorCount` 1, prefetch 150, batched sends, Service Bus 1 MU, SQL GP 4 vCores), but with a new message mix: **5% of messages have a matching SKU and go to the Service Bus queue, and 95% have no match and go to the event hub** (`--unmatched-ratio 0.95`). Steps were 5 minutes, not 6, to fit a 30-minute window, so each step's steady window is 3 minutes (first and last minute dropped).
+
+**Event Hubs changed for this test (live change, not in Bicep).** As deployed (Standard, 1 TU, 2 partitions), Event Hubs would have throttled even the 350 step: 95% of 350 msg/s at about 4.7 KB per event is about 1.6 MB/s, and on Standard each throughput unit and each partition takes about 1 MB/s. The namespace was scaled to **8 TUs**. Partition count cannot be changed on Standard, so the event hub was **deleted and recreated with 8 partitions** and its two role assignments re-added. The Bicep defaults are still 1 TU and 2 partitions; a redeploy over this environment would try to set 2 partitions on the 8-partition hub and fail. Bring the Bicep in line (or tear down) before redeploying.
+
+| Load (msg/s) | Outcome | App Service CPU avg / busiest | SQL CPU avg / peak | Service Bus CPU avg / peak | Event Hubs ingress (events/s, MB/s) | Event Hubs use of 8 TU | Event Hubs throttled / errors |
+|---|---|---|---|---|---|---|---|
+| 350 | held, p95 0.1 s, p99 0.2 s | 11% / 12% | 5% / 5% | 23% / 30% | 337/s, 1.6 MB/s | 20% | 0 / 0 |
+| 700 | held, p95 0.2 s, p99 0.3 s | 14% / 15% | 10% / 10% | 30% / 32% | 674/s, 3.1 MB/s | 39% | 0 / 0 |
+| 1,000 | held, p95 0.2 s, p99 0.3 s | 19% / 21% | 13% / 14% | 33% / 35% | 961/s, 4.5 MB/s | 56% | 0 / 0 |
+| 1,300 | held, p95 0.3 s, p99 1 s | 24% / 28% | 18% / 18% | 42% / 44% | 1,243/s, 5.8 MB/s | 73% | 0 / 0 |
+
+Event Hubs ingress is the busiest minute in the steady window (incoming messages and incoming bytes). The per-minute averages are pulled down by partially reported minutes, while the busiest minute matches the expected 95% of the rate. TU use is ingress MB/s against the 8 MB/s that 8 TUs allow. Event Hubs took about 5.5 events per send request (batch average 4.6 to 4.7). App Service memory 33 to 34%; Service Bus memory 52 to 53%; SQL workers 2% or below, log and I/O 0%; Service Bus throttling and server errors 0; Event Hubs user errors 0. No abandons or dead-letters: 955,340 messages went to the event hub and 49,910 to the queue (5.0%). Every step held its target, with no backlog at the end.
+
+**What changes with the mix**
+
+- **Service Bus CPU drops by 10 to 20 points** with the output on Event Hubs instead: 33% against 42% at 1,000 msg/s, and 42% against 55 to 62% at 1,300. That is the output queue's share of the namespace. It confirms that moving output off a shared Service Bus namespace is the largest lever on its CPU. At this mix, 1 MU would reach the 70% guideline somewhere well above 1,300 msg/s (not measured).
+- **Event Hubs becomes the resource to size.** Ingress is about 4.5 MB/s per 1,000 msg/s at this mix, so it needs roughly **1 TU and 1 partition per 220 msg/s**: 2 TUs at 350, 4 at 700, 5 at 1,000 and 6 at 1,300, plus margin. Partitions are fixed at creation on Standard, so choose them for the peak up front. Auto-inflate (off in the POC) can raise TUs automatically but cannot add partitions.
+- **App Service and SQL barely change.** The processor does the same lookups and the same number of sends either way: App Service 24% at 1,300 against 25%, SQL 18% against 18%.
+- **Latency is unchanged up to 1,000 msg/s.** At 1,300, p99 rose to 1 s (0.5 s with the 10% mix); p95 stayed at 0.3 s.
+
+Raw inputs: `runs/ramp-raw-20261118/testA-eh95-*` and `azure-monitor-per-minute-eh95.tsv`; the analysis script is `analyze-eh95.sh`.
